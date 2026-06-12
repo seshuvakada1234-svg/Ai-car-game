@@ -76,6 +76,7 @@ export interface GameSettings {
   playerName: string;
   difficulty: Difficulty;
   carColor: string;
+  selectedCar: 'lamborghini' | 'ferrari' | 'bugatti' | 'porsche';
 }
 
 export type GamePhase = 'menu' | 'countdown' | 'racing' | 'completed';

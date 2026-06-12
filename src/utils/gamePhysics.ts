@@ -100,12 +100,19 @@ export class GamePhysicsService {
     this.carHasPassedMidpoint.clear();
 
     // 1. Setup Player
+    const playerSpawnX = -6;
+    const playerSpawnZ = -15;
+    const tempP3 = new THREE.Vector3(playerSpawnX, 0, playerSpawnZ);
+    const pTrackInfo = this.trackHelper.getNearestTrackInfo(tempP3);
+    const pRoadHeight = pTrackInfo ? pTrackInfo.nearestPoint.y : 0;
+    const playerSpawnY = pRoadHeight + 0.05;
+
     result.push({
       id: 'player',
       name: playerName || 'Player',
       isAI: false,
       color: playerCarColor || '#0062ff',
-      position: { x: -6, y: 0.1, z: -15 }, // starting node lane grid offset
+      position: { x: playerSpawnX, y: playerSpawnY, z: playerSpawnZ }, // starting node lane grid offset
       velocity: { x: 0, y: 0, z: 0 },
       speed: 0,
       angle: 0.15,
@@ -135,6 +142,11 @@ export class GamePhysicsService {
       const offsetX = side * 7.5;
       const offsetZ = -row * 16 - 8;
 
+      const tempR3 = new THREE.Vector3(offsetX, 0, offsetZ);
+      const aiTrackInfo = this.trackHelper.getNearestTrackInfo(tempR3);
+      const aiRoadHeight = aiTrackInfo ? aiTrackInfo.nearestPoint.y : 0;
+      const aiSpawnY = aiRoadHeight + 0.05;
+
       let speedFactor = 0.88;
       let aggression = 0.45;
       if (difficulty === 'medium') {
@@ -150,7 +162,7 @@ export class GamePhysicsService {
         name: aiNames[i],
         isAI: true,
         color: aiColors[i],
-        position: { x: offsetX, y: 0.1, z: offsetZ },
+        position: { x: offsetX, y: aiSpawnY, z: offsetZ },
         velocity: { x: 0, y: 0, z: 0 },
         speed: 0,
         angle: 0.15,
@@ -189,13 +201,18 @@ export class GamePhysicsService {
       const laneSide = t % 2 === 0 ? -4.5 : 4.5;
       const spawnPos = pt.clone().addScaledVector(normal, laneSide);
       const angle = Math.atan2(tangent.x, tangent.z);
+
+      const trafficPos3 = new THREE.Vector3(spawnPos.x, 0, spawnPos.z);
+      const trafficTrackInfo = this.trackHelper.getNearestTrackInfo(trafficPos3);
+      const trafficRoadHeight = trafficTrackInfo ? trafficTrackInfo.nearestPoint.y : 0;
+      const trafficSpawnY = trafficRoadHeight + 0.05;
       
       result.push({
         id: `traffic_${t}`,
         name: trafficNames[t],
         isAI: true,
         color: trafficColors[t],
-        position: { x: spawnPos.x, y: spawnPos.y + 0.15, z: spawnPos.z },
+        position: { x: spawnPos.x, y: trafficSpawnY, z: spawnPos.z },
         velocity: { x: tangent.x * 6, y: 0, z: tangent.z * 6 },
         speed: 22,
         angle: angle,
@@ -398,11 +415,8 @@ export class GamePhysicsService {
     const trackInfo = this.trackHelper.getNearestTrackInfo(pos3);
 
     // Exact spline altitude mapping
-    let roadY = trackInfo.nearestPoint.y + 0.12;
-    const rType = this.trackHelper.getRoadTypeAt(trackInfo.progress);
-    if (rType === 'bridge') {
-      roadY += 0.22;
-    }
+    const roadHeight = trackInfo.nearestPoint.y;
+    let roadY = roadHeight + 0.05;
 
     // Advanced Vertical Suspension Engine (Gravity when airborne, spring-damper when grounded)
     if (car.position.y <= roadY + 0.05) {
@@ -423,9 +437,14 @@ export class GamePhysicsService {
     car.position.y += car.velocity.y * dt;
 
     // Prevent sinking
-    if (car.position.y < roadY) {
-      car.position.y = roadY;
+    if (car.position.y < roadHeight + 0.05) {
+      car.position.y = roadHeight + 0.05;
       car.velocity.y = 0;
+    }
+
+    // ANTI-FLOATING SAFETY
+    if (car.position.y > roadHeight + 0.2) {
+      car.position.y = roadHeight + 0.05;
     }
 
     // 4. Absolute Solid Guardrail Barrier Constraint (Ricochet Bouncing)
@@ -657,10 +676,10 @@ export class GamePhysicsService {
 
     for (let i = 0; i < size; i++) {
       const a = cars[i];
-      if (a.isFinished) continue;
+      if (!a || !a.position || !a.velocity || a.isFinished) continue;
       for (let j = i + 1; j < size; j++) {
         const b = cars[j];
-        if (b.isFinished) continue;
+        if (!b || !b.position || !b.velocity || b.isFinished) continue;
 
         const dx = b.position.x - a.position.x;
         const dz = b.position.z - a.position.z;

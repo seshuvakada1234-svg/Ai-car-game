@@ -3,8 +3,127 @@ import * as THREE from 'three';
 import { CarState, ControlsState } from '../types';
 import { GamePhysicsService } from '../utils/gamePhysics';
 import { TrackGeometryHelper } from '../utils/track';
-import { gltfModelCache, preloadGLTFAssets, buildProceduralCar, getCarModelForId } from '../world/procedural';
+import { gltfModelCache, preloadGLTFAssets, createCarChassisGroup, getCarModelForId, modelWheelMetadataMap, loadCarModel } from '../world/procedural';
 import { DragonTrackWorld } from '../world/DragonTrackWorld';
+
+// ------------------------------------------------------------
+// HIGH-FI DYNAMIC SYNTHESIZED HYPERCAR ENGINE SOUND SYSTEM
+// ------------------------------------------------------------
+class EngineSoundSystem {
+  private ctx: AudioContext | null = null;
+  private mainOsc: OscillatorNode | null = null;
+  private subOsc: OscillatorNode | null = null;
+  private lowpass: BiquadFilterNode | null = null;
+  private gainNode: GainNode | null = null;
+  private active = false;
+
+  constructor() {}
+
+  private init() {
+    if (this.ctx) return;
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      this.ctx = new AudioCtx();
+
+      // Main sawtooth growl Oscillator
+      this.mainOsc = this.ctx.createOscillator();
+      this.mainOsc.type = 'sawtooth';
+
+      // Sub frequency triangle Oscillator
+      this.subOsc = this.ctx.createOscillator();
+      this.subOsc.type = 'triangle';
+
+      // Dynamic lowpass filter to muffle or open exhaust tones
+      this.lowpass = this.ctx.createBiquadFilter();
+      this.lowpass.type = 'lowpass';
+      this.lowpass.Q.value = 3.5;
+
+      // Master output volume gain
+      this.gainNode = this.ctx.createGain();
+      this.gainNode.gain.setValueAtTime(0, this.ctx.currentTime);
+
+      this.mainOsc.connect(this.lowpass);
+      this.subOsc.connect(this.lowpass);
+      this.lowpass.connect(this.gainNode);
+      this.gainNode.connect(this.ctx.destination);
+
+      this.mainOsc.start(0);
+      this.subOsc.start(0);
+
+      this.active = true;
+    } catch (err) {
+      console.warn('Web Audio Engine failed to load:', err);
+    }
+  }
+
+  public setSpeed(speed: number, isNitro: boolean, isPaused: boolean, soundEnabled: boolean, state: string) {
+    if (!soundEnabled || isPaused || (state !== 'racing' && state !== 'countdown')) {
+      if (this.gainNode && this.ctx) {
+        this.gainNode.gain.setTargetAtTime(0, this.ctx.currentTime, 0.08); // fade out
+      }
+      return;
+    }
+
+    if (!this.ctx) {
+      this.init();
+    }
+
+    if (this.ctx && this.ctx.state === 'suspended') {
+      this.ctx.resume().catch(() => {});
+    }
+
+    if (!this.active || !this.ctx) return;
+
+    const absSpeed = Math.abs(speed);
+    const speedKmh = absSpeed * 3.6;
+
+    // Simulate multi-speed gearbox with distinct pitch jumps (looks and sounds like NFS!)
+    let gear = 1;
+    let minG = 0;
+    let maxG = 40;
+
+    if (speedKmh > 210) { gear = 6; minG = 210; maxG = 340; }
+    else if (speedKmh > 160) { gear = 5; minG = 160; maxG = 210; }
+    else if (speedKmh > 115) { gear = 4; minG = 115; maxG = 160; }
+    else if (speedKmh > 75) { gear = 3; minG = 75; maxG = 115; }
+    else if (speedKmh > 40) { gear = 2; minG = 40; maxG = 75; }
+
+    const ratio = Math.max(0, Math.min(1.0, (speedKmh - minG) / (maxG - minG)));
+    const rpm = 800 + ratio * 6400; // 800 to 7200 RPM
+
+    // Base pitch modulation
+    const fundamental = (rpm / 60) * 1.4;
+    const t = this.ctx.currentTime;
+
+    if (this.mainOsc) {
+      this.mainOsc.frequency.setTargetAtTime(fundamental, t, 0.06);
+    }
+    if (this.subOsc) {
+      this.subOsc.frequency.setTargetAtTime(fundamental * 0.5, t, 0.06);
+    }
+
+    if (this.lowpass) {
+      const lpfFreq = 180 + (rpm / 7200) * 1600 + (isNitro ? 500 : 0);
+      this.lowpass.frequency.setTargetAtTime(lpfFreq, t, 0.06);
+    }
+
+    if (this.gainNode) {
+      let vol = 0.06 + (rpm / 7200) * 0.12;
+      if (isNitro) vol *= 1.35;
+      this.gainNode.gain.setTargetAtTime(vol, t, 0.04);
+    }
+  }
+
+  public dispose() {
+    this.active = false;
+    try {
+      if (this.ctx) {
+        this.ctx.close();
+      }
+    } catch (e) {}
+  }
+}
 
 // ------------------------------------------------------------
 // HIGH-PERFORMANCE DYNAMIC NEON LIGHT RIBBON TRAILS FOR ASPHALT EXPERIENCE
@@ -139,6 +258,7 @@ interface GameCanvasProps {
   gameState: string;
   onFinishRace: () => void;
   onTick: (updatedCars: CarState[]) => void;
+  soundEnabled?: boolean;
 }
 
 export const GameCanvas: React.FC<GameCanvasProps> = ({
@@ -150,6 +270,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   gameState,
   onFinishRace,
   onTick,
+  soundEnabled = true,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -162,6 +283,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   const isPausedRef = useRef<boolean>(isPaused);
   const onFinishRaceRef = useRef<() => void>(onFinishRace);
   const onTickRef = useRef<(updatedCars: CarState[]) => void>(onTick);
+  
+  const soundSystemRef = useRef<EngineSoundSystem | null>(null);
+  const soundEnabledRef = useRef<boolean>(soundEnabled);
 
   useEffect(() => { carsRef.current = cars; }, [cars]);
   useEffect(() => { controlsRef.current = playerControls; }, [playerControls]);
@@ -169,6 +293,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
   useEffect(() => { onFinishRaceRef.current = onFinishRace; }, [onFinishRace]);
   useEffect(() => { onTickRef.current = onTick; }, [onTick]);
+  useEffect(() => { soundEnabledRef.current = soundEnabled; }, [soundEnabled]);
 
   useEffect(() => {
     if (!canvasRef.current || !containerRef.current) return;
@@ -187,7 +312,10 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type = THREE.PCFShadowMap;
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.0;
 
     // --- 2. ENVIRONMENT MAP ---
     const createReflectionMap = () => {
@@ -219,9 +347,13 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     const carSpinnersMap = new Map<string, THREE.Group[]>();
     const tailLightMatMap = new Map<string, THREE.MeshBasicMaterial>();
     const paintMatMap = new Map<string, THREE.MeshStandardMaterial>();
+    const modelBrakeLightMap = new Map<string, THREE.MeshStandardMaterial[]>();
+
+    const soundSystem = new EngineSoundSystem();
+    soundSystemRef.current = soundSystem;
 
     carsRef.current.forEach(c => {
-      const carData = buildProceduralCar(c, reflectionTex, scene);
+      const carData = createCarChassisGroup(c, reflectionTex, scene);
       carGroupMap.set(c.id, carData.group);
       carPivotsMap.set(c.id, carData.pivots);
       carSpinnersMap.set(c.id, carData.spinners);
@@ -366,7 +498,10 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       if (elapsedSec > 0.1) elapsedSec = 0.1;
       oldTime = currentTime;
 
-      const currentCars = [...carsRef.current];
+      const currentCars = carsRef.current ? [...carsRef.current] : [];
+      if (currentCars.length === 0) {
+        return; // Skip this frame if cars are not initialized
+      }
 
       if (!isPausedRef.current && gameStateRef.current !== 'completed') {
         runningTime += elapsedSec;
@@ -374,12 +509,12 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         while (accumulatedTime >= fixedDt) {
           const isRaceLocked = gameStateRef.current === 'countdown' || gameStateRef.current === 'menu';
           const playerCar = currentCars.find(c => c.id === 'player');
-          if (playerCar) {
+          if (playerCar && playerCar.position && playerCar.velocity) {
             physicsService.updateCar(playerCar, fixedDt, controlsRef.current, isRaceLocked);
             physicsService.generateExhaustParticles(playerCar, fixedDt);
           }
           currentCars.forEach(c => {
-            if (c.isAI) {
+            if (c && c.position && c.velocity && c.isAI) {
               physicsService.updateAICar(c, fixedDt, currentCars);
               physicsService.generateExhaustParticles(c, fixedDt);
             }
@@ -392,7 +527,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         onTickRef.current(currentCars);
 
         const player = currentCars.find(c => c.id === 'player');
-        if (player && player.isFinished && gameStateRef.current === 'racing') {
+        if (player && player.position && player.isFinished && gameStateRef.current === 'racing') {
           onFinishRaceRef.current();
         }
       }
@@ -401,16 +536,44 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       const playerObj = currentCars.find(c => c.id === 'player');
       const isFinished = playerObj ? playerObj.isFinished : false;
       const rank = playerObj ? playerObj.racePosition : 1;
-      dragonWorld.update(elapsedSec, trackHelper, rank, isFinished);
+      if (playerObj && playerObj.position) {
+        dragonWorld.update(elapsedSec, trackHelper, rank, isFinished);
+      }
 
       // Animate Vehicles
       currentCars.forEach(c => {
+        if (!c || !c.id || !c.position) return;
         const carGroup = carGroupMap.get(c.id);
         const pivots = carPivotsMap.get(c.id);
         const spinners = carSpinnersMap.get(c.id);
 
-        if (carGroup) {
+        if (carGroup && carGroup.position && carGroup.rotation) {
           carGroup.position.set(c.position.x, c.position.y, c.position.z);
+
+          // Ground Raycast
+          const raycastOrigin = new THREE.Vector3(c.position.x, c.position.y + 1.0, c.position.z);
+          const raycaster = new THREE.Raycaster(
+            raycastOrigin,
+            new THREE.Vector3(0, -1, 0),
+            0,
+            100
+          );
+          
+          const roadMeshes: THREE.Object3D[] = [];
+          scene.traverse(node => {
+            if (node instanceof THREE.Mesh) {
+              const nodeName = node.name.toLowerCase();
+              if (nodeName.includes('road') || nodeName.includes('bridge') || nodeName.includes('highway') || nodeName.includes('tunnel') || nodeName.includes('terrain') || nodeName.includes('ground')) {
+                roadMeshes.push(node);
+              }
+            }
+          });
+          
+          const intersections = raycaster.intersectObjects(roadMeshes, true);
+          if (intersections.length > 0) {
+            c.position.y = intersections[0].point.y + 0.05;
+            carGroup.position.y = c.position.y;
+          }
           carGroup.rotation.y = c.angle;
 
           // Premium speed-sensitive suspension body roll, weight transfer & road micro-vibrations
@@ -450,8 +613,25 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             }
           }
           const rotDelta = (wheelRotationSpeed * elapsedSec) / 0.38;
-          if (spinners) {
-            spinners.forEach(s => { s.rotation.x += rotDelta; });
+          
+          const hasGltf = carGroup.getObjectByName('gltf_car_model');
+          if (hasGltf) {
+            if (pivots) {
+              pivots.forEach(p => { p.visible = false; });
+            }
+            if (spinners) {
+              spinners.forEach(s => { s.visible = false; });
+            }
+            // Spin the real GLB wheels
+            if ((carGroup as any).glbWheels) {
+              (carGroup as any).glbWheels.forEach((w: THREE.Object3D) => {
+                w.rotateX(rotDelta);
+              });
+            }
+          } else {
+            if (spinners) {
+              spinners.forEach(s => { s.rotation.x += rotDelta; });
+            }
           }
 
           // steering pivot angles
@@ -470,7 +650,11 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           // GLTF dynamic supercar models hot swap
           if (gltfModelCache.isLoaded) {
             const hasGltf = carGroup.getObjectByName('gltf_car_model');
-            if (!hasGltf) {
+            if (hasGltf) {
+              if (c.id === 'player') {
+                (window as any).playerCarAddedToScene = true;
+              }
+            } else {
               const modelSource = getCarModelForId(c.id);
               if (modelSource) {
                 // Hide procedural body elements, except pivots/spinners of our dynamic tire assembly
@@ -481,32 +665,112 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                   }
                 });
                 const clonedModel = modelSource.clone();
-                const bbox = new THREE.Box3().setFromObject(clonedModel);
-                const size = bbox.getSize(new THREE.Vector3());
-                if (size.z > 0) {
-                  // Standardize all supercars back-set length to align with original 4.1 width proportions
-                  const sf = 4.1 / size.z;
-                  clonedModel.scale.set(sf, sf, sf);
-                } else {
-                  clonedModel.scale.set(1.5, 1.5, 1.5);
-                }
-                clonedModel.position.set(0, 0.1, 0);
+
+                // 1. Compute its bounding box.
+                const box = new THREE.Box3().setFromObject(clonedModel);
+                const size = box.getSize(new THREE.Vector3());
+                const center = box.getCenter(new THREE.Vector3());
+
+                clonedModel.userData.boundingBox = box;
+                clonedModel.userData.height = size.y;
+
+                // Move the car so its bottom sits on the ground:
+                clonedModel.position.y -= box.min.y;
+
+                // Center the model:
+                clonedModel.position.x -= center.x;
+                clonedModel.position.z -= center.z;
+
+                console.log(
+                  "Car height:",
+                  size.y,
+                  "box.min.y:",
+                  box.min.y,
+                  "final y:",
+                  clonedModel.position.y
+                );
+
                 clonedModel.name = 'gltf_car_model';
-                
+
+                // Automatically detect wheels:
+                if (!(carGroup as any).glbWheels) {
+                  (carGroup as any).glbWheels = [];
+                }
+                clonedModel.traverse((node) => {
+                  if (node.name.toLowerCase().includes("wheel")) {
+                    (carGroup as any).glbWheels.push(node);
+                  }
+                });
+
+                // 4. Disable procedural wheels when a GLB vehicle exists.
+                if (pivots) {
+                  pivots.forEach(p => { p.visible = false; });
+                }
+                if (spinners) {
+                  spinners.forEach(s => { s.visible = false; });
+                }
+
                 clonedModel.traverse(node => {
                   if (node instanceof THREE.Mesh) {
                     node.castShadow = true;
                     node.receiveShadow = true;
+
+                    // Set metalness 0.8, roughness 0.5, emissive 0 on original GLTF materials to keep original colors
+                    const materials = Array.isArray(node.material) ? node.material : [node.material];
+                    materials.forEach(mat => {
+                      if (mat) {
+                        if (mat.emissive && typeof mat.emissive.set === 'function') {
+                          mat.emissive.set(0x000000);
+                        }
+                        mat.emissiveIntensity = 0;
+                        mat.roughness = 0.5;
+                        mat.metalness = 0.8;
+                      }
+                    });
+                    return;
                     
                     const nodeName = node.name.toLowerCase();
-                    // Clean duplicate wheels/tires inside the model structure so they don't block our pivoting chassis
-                    if (nodeName.includes('wheel') || nodeName.includes('tire') || nodeName.includes('rim') || nodeName.includes('pneu')) {
-                      node.visible = false;
+                    // 5. Use the wheels included in the GLB model—do NOT hide them!
+                    const isWheel = nodeName.includes('wheel') || nodeName.includes('tire') || nodeName.includes('rim') || nodeName.includes('pneu');
+                    if (isWheel) {
+                      if (!(carGroup as any).glbWheels) {
+                        (carGroup as any).glbWheels = [];
+                      }
+                      (carGroup as any).glbWheels.push(node);
+                      
+                      // Material for tires & rims
+                      if (nodeName.includes('rim') || nodeName.includes('wheel')) {
+                        node.material = new THREE.MeshStandardMaterial({
+                          color: '#dedede',
+                          roughness: 0.15,
+                          metalness: 0.95,
+                          envMap: reflectionTex,
+                          envMapIntensity: 2.8
+                        });
+                      } else {
+                        node.material = new THREE.MeshStandardMaterial({
+                          color: '#121213',
+                          roughness: 0.9,
+                          metalness: 0.02
+                        });
+                      }
                       return;
                     }
 
-                    // Apply high-end real-time reflection shader properties
-                    if (nodeName.includes('glass') || nodeName.includes('window')) {
+                    // Look for model brake light parts
+                    const isBrakeLight = nodeName.includes('taillight') || nodeName.includes('brake') || nodeName.includes('light_back') || nodeName.includes('glass_red') || nodeName.includes('led_back');
+                    if (isBrakeLight) {
+                      const brakeMat = new THREE.MeshStandardMaterial({
+                        color: '#ff111a',
+                        roughness: 0.1,
+                        metalness: 0.9,
+                        emissive: new THREE.Color('#320001')
+                      });
+                      node.material = brakeMat;
+                      const arr = modelBrakeLightMap.get(c.id) || [];
+                      arr.push(brakeMat);
+                      modelBrakeLightMap.set(c.id, arr);
+                    } else if (nodeName.includes('glass') || nodeName.includes('window')) {
                       node.material = new THREE.MeshStandardMaterial({
                         color: '#08090f',
                         metalness: 0.98,
@@ -530,6 +794,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                   }
                 });
                 carGroup.add(clonedModel);
+                if (c.id === 'player') {
+                  (window as any).playerCarAddedToScene = true;
+                }
               }
             }
           }
@@ -538,6 +805,33 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           const isBraking = c.id === 'player' ? controlsRef.current.backward : (c.speed < 18 && Math.random() > 0.4);
           const tMat = tailLightMatMap.get(c.id);
           if (tMat) tMat.color.set(isBraking ? '#ff111a' : '#770010');
+
+          // Highlight emissive layers on GLB brake lights
+          const modelBrakeMats = modelBrakeLightMap.get(c.id);
+          if (modelBrakeMats) {
+            modelBrakeMats.forEach(m => {
+              if (isBraking) {
+                m.emissive.set('#ff0000');
+                m.emissiveIntensity = 4.0;
+              } else {
+                m.emissive.set('#320001');
+                m.emissiveIntensity = 1.0;
+              }
+            });
+          }
+
+          // Trigger simulated engine audio pitching
+          if (c.id === 'player') {
+            if (soundSystemRef.current) {
+              soundSystemRef.current.setSpeed(
+                c.speed,
+                c.isNitroActive,
+                isPausedRef.current,
+                soundEnabledRef.current,
+                gameStateRef.current
+              );
+            }
+          }
 
           // dynamic exhaust nitro cones flares
           carGroup.traverse(child => {
@@ -649,11 +943,11 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         camera.updateProjectionMatrix();
 
         // Camera back-set distance and height reacts dynamically to speed & boosts
-        let camDist = 5.2 + speedRatio * 1.6;
-        let camHeight = 2.4 - speedRatio * 0.45;
+        let camDist = 8.5 + speedRatio * 2.8;
+        let camHeight = 3.6 - speedRatio * 0.4;
         
         if (player.isNitroActive) {
-          camDist += 1.0;
+          camDist += 1.8;
           camHeight -= 0.15;
         }
 
@@ -678,12 +972,24 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         camera.position.y = THREE.MathUtils.lerp(camera.position.y, targetCamPos.y, 1 - Math.exp(-14.0 * elapsedSec));
         camera.position.z = THREE.MathUtils.lerp(camera.position.z, targetCamPos.z, 1 - Math.exp(-8.5 * elapsedSec));
 
+        // Prevent clipping through the vehicle body by enforcing a minimum distance and height relative to player
+        const toCam = new THREE.Vector3().subVectors(camera.position, player.position);
+        const minCamDist = 6.8;
+        if (toCam.length() < minCamDist) {
+          toCam.normalize().multiplyScalar(minCamDist);
+          camera.position.copy(player.position).add(toCam);
+        }
+        const minCamHeight = player.position.y + 1.8;
+        if (camera.position.y < minCamHeight) {
+          camera.position.y = minCamHeight;
+        }
+
         // Look at coordinates track ahead of the nose of the car to see curves
         const lookAheadX = Math.sin(player.angle) * (3.0 + speedRatio * 4.0);
         const lookAheadZ = Math.cos(player.angle) * (3.0 + speedRatio * 4.0);
         const targetLookAt = new THREE.Vector3(
           player.position.x + lookAheadX,
-          player.position.y + 0.8,
+          player.position.y + 1.1,
           player.position.z + lookAheadZ
         );
 

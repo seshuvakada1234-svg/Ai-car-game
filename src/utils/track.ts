@@ -291,11 +291,21 @@ export class TrackGeometryHelper {
 
     // Calculate accurate analytical track spline length by summing segments
     let calculatedLength = 0;
-    for (let idx = 0; idx < this.cachedPoints.length - 1; idx++) {
-      calculatedLength += this.cachedPoints[idx].distanceTo(this.cachedPoints[idx + 1]);
+    if (this.cachedPoints && this.cachedPoints.length > 1) {
+      for (let idx = 0; idx < this.cachedPoints.length - 1; idx++) {
+        const ptA = this.cachedPoints[idx];
+        const ptB = this.cachedPoints[idx + 1];
+        if (ptA && ptB && typeof ptA.distanceTo === 'function') {
+          calculatedLength += ptA.distanceTo(ptB);
+        }
+      }
+      const lastPt = this.cachedPoints[this.cachedPoints.length - 1];
+      const firstPt = this.cachedPoints[0];
+      if (lastPt && firstPt && typeof lastPt.distanceTo === 'function') {
+        calculatedLength += lastPt.distanceTo(firstPt);
+      }
     }
-    calculatedLength += this.cachedPoints[this.cachedPoints.length - 1].distanceTo(this.cachedPoints[0]);
-    this.length = calculatedLength;
+    this.length = calculatedLength || 4150.0;
 
     // Dyn-align gates and landmarks on actual track spline points
     const startPt = this.curve.getPointAt(0.0);
@@ -377,9 +387,10 @@ export class TrackGeometryHelper {
         for (let i = 0; i < samples; i++) {
           const u = i / samples;
           const pt = this.cachedPoints[i];
-          if (!pt) continue;
+          if (!pt || typeof pt.distanceToSquared !== 'function') continue;
+          
           const distSq = pos.distanceToSquared(pt);
-          if (distSq < minDistance) {
+          if (!isNaN(distSq) && distSq < minDistance) {
             minDistance = distSq;
             nearestProgress = u;
             nearestPoint.copy(pt);
@@ -390,24 +401,43 @@ export class TrackGeometryHelper {
         const startPt = this.curve ? this.curve.getPointAt(0) : new THREE.Vector3();
         if (startPt) {
           nearestPoint.copy(startPt);
-          minDistance = pos.distanceToSquared(nearestPoint);
+          if (typeof pos.distanceToSquared === 'function') {
+            const distSq = pos.distanceToSquared(nearestPoint);
+            if (!isNaN(distSq)) {
+              minDistance = distSq;
+            }
+          }
         }
       }
 
       let preciseProgress = nearestProgress;
+      if (isNaN(preciseProgress) || preciseProgress === undefined || preciseProgress === null) {
+        preciseProgress = 0;
+      }
       const searchStep = 1 / (Math.max(samples, 1) * 5);
       const tempPt = SCRATCH_POS_A;
       if (this.curve && typeof this.curve.getPointAt === 'function') {
         for (let step = -4; step <= 4; step++) {
-          const u = (nearestProgress + step * searchStep + 1.0) % 1.0;
-          this.curve.getPointAt(u, tempPt);
-          const distSq = pos.distanceToSquared(tempPt);
-          if (distSq < minDistance) {
-            minDistance = distSq;
-            preciseProgress = u;
-            nearestPoint.copy(tempPt);
+          let u = (nearestProgress + step * searchStep + 1.0) % 1.0;
+          if (isNaN(u) || u === undefined || u === null) u = 0.0;
+          try {
+            this.curve.getPointAt(u, tempPt);
+            if (tempPt && typeof tempPt.distanceToSquared === 'function' && typeof pos.distanceToSquared === 'function') {
+              const distSq = pos.distanceToSquared(tempPt);
+              if (!isNaN(distSq) && distSq < minDistance) {
+                minDistance = distSq;
+                preciseProgress = u;
+                nearestPoint.copy(tempPt);
+              }
+            }
+          } catch (e) {
+            // ignore failure for this sample step
           }
         }
+      }
+
+      if (isNaN(preciseProgress) || preciseProgress === undefined || preciseProgress === null) {
+        preciseProgress = 0;
       }
 
       const tangent = new THREE.Vector3();
@@ -430,7 +460,7 @@ export class TrackGeometryHelper {
         normal,
         width,
         sideOffset,
-        distanceToTrack: Math.sqrt(minDistance),
+        distanceToTrack: Math.sqrt(minDistance === Infinity ? 0 : minDistance),
       };
     } catch (err) {
       console.warn("Exception caught in getNearestTrackInfo, returning safe fallback values:", err);

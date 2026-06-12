@@ -12,6 +12,7 @@ import { HUD } from './components/HUD';
 import { Menu } from './components/Menu';
 import { GameOver } from './components/GameOver';
 import { Trophy, Compass, Sparkles, Volume2, VolumeX, AlertCircle } from 'lucide-react';
+import { selectRandomPlayerCar, setPlayerSelectedModelKey } from './world/procedural';
 
 export default function App() {
   // Game states orchestration
@@ -110,6 +111,12 @@ export default function App() {
       setCountdownMsg('READY');
 
       const tickCountdown = () => {
+        if (!(window as any).playerCarAddedToScene) {
+          console.log('Waiting for player vehicle to be successfully loaded and added to the scene...');
+          setCountdownMsg('READY...');
+          return;
+        }
+
         setCountdown(prev => {
           if (prev === 3) {
             setCountdownMsg('3');
@@ -161,9 +168,19 @@ export default function App() {
 
   // Start the actual game from configurations
   const handleStartGame = (cfg: GameSettings) => {
+    // Reset vehicle added state
+    (window as any).playerCarAddedToScene = false;
+
     setSettings(cfg);
     setElapsedTime(0);
     setIsPaused(false);
+
+    // Apply exact player selected vehicle key
+    const modelKey = cfg.selectedCar === 'lamborghini' ? 'lamborghini_aventador' :
+                      cfg.selectedCar === 'ferrari' ? 'ferrari_purosangue' :
+                      cfg.selectedCar === 'bugatti' ? 'bugatti_chiron_top_edition' :
+                      'porsche_911_gt3';
+    setPlayerSelectedModelKey(modelKey);
 
     // Try to rotate to horizontal landscape mode automatically
     try {
@@ -243,6 +260,7 @@ export default function App() {
           gameState={phase}
           onFinishRace={() => setPhase('completed')}
           onTick={handleTickUpdate}
+          soundEnabled={soundEnabled}
         />
       )}
 
