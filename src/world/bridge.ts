@@ -31,8 +31,8 @@ export function buildBridge(scene: THREE.Scene, trackHelper: TrackGeometryHelper
   
   towerProgresses.forEach(u => {
     const pos = trackHelper.curve.getPointAt(u);
-    const riverBedY = -34.8; // Canyon gorge river bottom
-    const towerTopY = pos.y + 32.0; // Extend towers 32m above road deck for cables
+    const riverBedY = -84.8; // Canyon gorge river bottom - UPDATED!
+    const towerTopY = pos.y + 42.0; // Extend towers 42m above road deck for dramatic cables!
     const totalPylonHeight = towerTopY - riverBedY;
 
     const tower = new THREE.Group();

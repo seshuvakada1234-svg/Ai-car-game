@@ -10,7 +10,7 @@ export interface WaterfallController {
 export function buildWaterfall(scene: THREE.Scene, trackHelper: TrackGeometryHelper): WaterfallController {
   // --- 1. RUSHING WATERFALL SURFACE ---
   const wfWidth = 32;
-  const wfHeight = 52;
+  const wfHeight = 85; // Taller cascades - UPDATED!
   const wfGeo = new THREE.PlaneGeometry(wfWidth, wfHeight, 1, 10);
   
   // High fidelity canvas drawing vertical cascading water-stream threads
@@ -52,7 +52,7 @@ export function buildWaterfall(scene: THREE.Scene, trackHelper: TrackGeometryHel
   const waterfall = new THREE.Mesh(wfGeo, wfMat);
   // Center of waterfall is placed just above the river basin level
   const baseLoc = trackHelper.waterfallPos.clone();
-  waterfall.position.set(baseLoc.x, baseLoc.y + 11, baseLoc.z);
+  waterfall.position.set(baseLoc.x, baseLoc.y + 26, baseLoc.z);
   // Angle the waterfall mesh to match the mountain cliff slant
   waterfall.rotation.set(0.12, Math.PI / 4 + 0.15, 0); 
   waterfall.castShadow = true;
@@ -74,8 +74,8 @@ export function buildWaterfall(scene: THREE.Scene, trackHelper: TrackGeometryHel
 
   const puffGeo = new THREE.IcosahedronGeometry(3.2, 1);
 
-  // Place the foam vapor generator exactly at the bottom pool coordinates
-  const poolCenter = new THREE.Vector3(baseLoc.x - 3.0, baseLoc.y - 20.0, baseLoc.z - 3.0);
+  // Place the foam vapor generator exactly at the bottom pool coordinates -35.0!
+  const poolCenter = new THREE.Vector3(baseLoc.x - 3.0, -35.0, baseLoc.z - 3.0);
 
   for (let i = 0; i < mistCount; i++) {
     const puff = new THREE.Mesh(puffGeo, mistMat.clone());

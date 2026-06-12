@@ -3,8 +3,132 @@ import * as THREE from 'three';
 import { CarState, ControlsState } from '../types';
 import { GamePhysicsService } from '../utils/gamePhysics';
 import { TrackGeometryHelper } from '../utils/track';
-import { gltfModelCache, preloadGLTFAssets, buildProceduralCar } from '../world/procedural';
+import { gltfModelCache, preloadGLTFAssets, buildProceduralCar, getCarModelForId } from '../world/procedural';
 import { DragonTrackWorld } from '../world/DragonTrackWorld';
+
+// ------------------------------------------------------------
+// HIGH-PERFORMANCE DYNAMIC NEON LIGHT RIBBON TRAILS FOR ASPHALT EXPERIENCE
+// ------------------------------------------------------------
+class RibbonTrail {
+  geometry: THREE.BufferGeometry;
+  mesh: THREE.Mesh;
+  positions: THREE.Vector3[] = [];
+  maxPoints: number;
+  thickness: number;
+
+  constructor(scene: THREE.Scene, color: string, maxPoints = 20, thickness = 0.22) {
+    this.maxPoints = maxPoints;
+    this.thickness = thickness;
+    this.geometry = new THREE.BufferGeometry();
+    
+    const vertexCount = maxPoints * 2;
+    const indexCount = (maxPoints - 1) * 6;
+    
+    const posArr = new Float32Array(vertexCount * 3);
+    const colArr = new Float32Array(vertexCount * 3);
+    const indicesArr = new Uint16Array(indexCount);
+    
+    for (let i = 0; i < maxPoints - 1; i++) {
+      const v0 = i * 2;
+      const v1 = i * 2 + 1;
+      const v2 = (i + 1) * 2;
+      const v3 = (i + 1) * 2 + 1;
+      
+      const idx = i * 6;
+      indicesArr[idx] = v0;
+      indicesArr[idx + 1] = v1;
+      indicesArr[idx + 2] = v2;
+      
+      indicesArr[idx + 3] = v1;
+      indicesArr[idx + 4] = v3;
+      indicesArr[idx + 5] = v2;
+    }
+    
+    this.geometry.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
+    this.geometry.setAttribute('color', new THREE.BufferAttribute(colArr, 3));
+    this.geometry.setIndex(new THREE.BufferAttribute(indicesArr, 1));
+    
+    const mat = new THREE.MeshBasicMaterial({
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.88,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      depthWrite: false
+    });
+    
+    this.mesh = new THREE.Mesh(this.geometry, mat);
+    scene.add(this.mesh);
+  }
+
+  addPoint(pt: THREE.Vector3, colorHex: string) {
+    this.positions.push(pt.clone());
+    if (this.positions.length > this.maxPoints) {
+      this.positions.shift();
+    }
+    this.updateGeometry(colorHex);
+  }
+
+  clear() {
+    this.positions = [];
+    const posAttr = this.geometry.getAttribute('position') as THREE.BufferAttribute;
+    const colAttr = this.geometry.getAttribute('color') as THREE.BufferAttribute;
+    for (let i = 0; i < posAttr.count; i++) {
+      posAttr.setXYZ(i, 9999, 9999, 9999);
+      colAttr.setXYZ(i, 0, 0, 0);
+    }
+    posAttr.needsUpdate = true;
+    colAttr.needsUpdate = true;
+  }
+
+  updateGeometry(colorHex: string) {
+    const posAttr = this.geometry.getAttribute('position') as THREE.BufferAttribute;
+    const colAttr = this.geometry.getAttribute('color') as THREE.BufferAttribute;
+    
+    const pts = this.positions;
+    const len = pts.length;
+    const baseColor = new THREE.Color(colorHex);
+    
+    for (let i = 0; i < this.maxPoints; i++) {
+      const v0 = i * 2;
+      const v1 = i * 2 + 1;
+      
+      if (i < len) {
+        const pt = pts[i];
+        
+        // Setup vertical width of ribbon
+        posAttr.setXYZ(v0, pt.x, pt.y - this.thickness / 2, pt.z);
+        posAttr.setXYZ(v1, pt.x, pt.y + this.thickness / 2, pt.z);
+        
+        // Exponential decay for glowing taper
+        const ratio = i / (len - 1 || 1);
+        const intensity = ratio * ratio * ratio;
+        
+        colAttr.setXYZ(v0, baseColor.r * intensity, baseColor.g * intensity, baseColor.b * intensity);
+        colAttr.setXYZ(v1, baseColor.r * intensity, baseColor.g * intensity, baseColor.b * intensity);
+      } else {
+        posAttr.setXYZ(v0, 9999, 9999, 9999);
+        posAttr.setXYZ(v1, 9999, 9999, 9999);
+        colAttr.setXYZ(v0, 0, 0, 0);
+        colAttr.setXYZ(v1, 0, 0, 0);
+      }
+    }
+    
+    posAttr.needsUpdate = true;
+    colAttr.needsUpdate = true;
+    this.geometry.computeBoundingBox();
+    this.geometry.computeBoundingSphere();
+  }
+
+  dispose() {
+    this.geometry.dispose();
+    if (Array.isArray(this.mesh.material)) {
+      this.mesh.material.forEach(m => m.dispose());
+    } else {
+      this.mesh.material.dispose();
+    }
+  }
+}
 
 interface GameCanvasProps {
   cars: CarState[];
@@ -105,7 +229,46 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       paintMatMap.set(c.id, carData.paintMat);
     });
 
-    // --- 5. LIGHTS ---
+    // --- 5. LIGHTS & REALISTIC SUNSET SKYDOME ---
+    const skyGeo = new THREE.SphereGeometry(1400, 32, 15);
+    skyGeo.scale(-1, 1, 1); // internal facing sphere shell
+    const skyColors: number[] = [];
+    const skyPos = skyGeo.attributes.position;
+    for (let i = 0; i < skyPos.count; i++) {
+      const y = skyPos.getY(i);
+      const ratio = (y + 1400) / 2800; // 0 to 1
+      let col = new THREE.Color();
+      if (ratio > 0.65) {
+        col.lerpColors(new THREE.Color('#030514'), new THREE.Color('#0e1329'), (ratio - 0.65) / 0.35);
+      } else if (ratio > 0.48) {
+        col.lerpColors(new THREE.Color('#ff0055'), new THREE.Color('#0e1329'), (ratio - 0.48) / 0.17);
+      } else if (ratio > 0.35) {
+        col.lerpColors(new THREE.Color('#ffa600'), new THREE.Color('#ff0055'), (ratio - 0.35) / 0.13);
+      } else {
+        col.lerpColors(new THREE.Color('#220e02'), new THREE.Color('#ffa600'), ratio / 0.35);
+      }
+      skyColors.push(col.r, col.g, col.b);
+    }
+    skyGeo.setAttribute('color', new THREE.Float32BufferAttribute(skyColors, 3));
+    const skyMat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false });
+    const skyDome = new THREE.Mesh(skyGeo, skyMat);
+    scene.add(skyDome);
+
+    // Glowing Lens Sun Disk
+    const sunDiskGeo = new THREE.CircleGeometry(42, 16);
+    const sunDiskMat = new THREE.MeshBasicMaterial({ color: '#fffdf6', transparent: true, opacity: 0.98, side: THREE.DoubleSide });
+    const sunDisk = new THREE.Mesh(sunDiskGeo, sunDiskMat);
+    sunDisk.position.set(120, 240, 80).normalize().multiplyScalar(1350);
+    sunDisk.lookAt(0, 0, 0);
+    scene.add(sunDisk);
+
+    const glowDiskGeo = new THREE.CircleGeometry(110, 16);
+    const glowDiskMat = new THREE.MeshBasicMaterial({ color: '#ff7700', transparent: true, opacity: 0.28, side: THREE.DoubleSide, blending: THREE.AdditiveBlending });
+    const sunGlow = new THREE.Mesh(glowDiskGeo, glowDiskMat);
+    sunGlow.position.copy(sunDisk.position);
+    sunGlow.lookAt(0, 0, 0);
+    scene.add(sunGlow);
+
     const sunLight = new THREE.DirectionalLight('#ffc891', 3.2);
     sunLight.position.set(120, 240, 80);
     sunLight.castShadow = true;
@@ -119,9 +282,24 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     sunLight.shadow.camera.top = shadowSize;
     sunLight.shadow.camera.bottom = -shadowSize;
     scene.add(sunLight);
+    scene.add(sunLight.target);
 
     const ambLight = new THREE.HemisphereLight('#0d2149', '#4d2d14', 1.0);
     scene.add(ambLight);
+
+    // Allocate Ribbon Trails for all cars (except daily commuter traffic)
+    const carLeftTailTrails = new Map<string, RibbonTrail>();
+    const carRightTailTrails = new Map<string, RibbonTrail>();
+    const carLeftExhaustTrails = new Map<string, RibbonTrail>();
+    const carRightExhaustTrails = new Map<string, RibbonTrail>();
+
+    carsRef.current.forEach(c => {
+      if (c.id.startsWith('traffic')) return;
+      carLeftTailTrails.set(c.id, new RibbonTrail(scene, '#ff0a26', 18, 0.22));
+      carRightTailTrails.set(c.id, new RibbonTrail(scene, '#ff0a26', 18, 0.22));
+      carLeftExhaustTrails.set(c.id, new RibbonTrail(scene, '#00e5ff', 12, 0.16));
+      carRightExhaustTrails.set(c.id, new RibbonTrail(scene, '#00e5ff', 12, 0.16));
+    });
 
     // Track street lights
     trackHelper.lights.forEach(lite => {
@@ -177,6 +355,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     let accumulatedTime = 0;
     const fixedDt = 1 / 60;
     let camShakePower = 0;
+    let runningTime = 0;
+    const smoothedLookAt = new THREE.Vector3();
+    let smoothedLookAtInitialized = false;
 
     const tick = () => {
       animationId = requestAnimationFrame(tick);
@@ -188,6 +369,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       const currentCars = [...carsRef.current];
 
       if (!isPausedRef.current && gameStateRef.current !== 'completed') {
+        runningTime += elapsedSec;
         accumulatedTime += elapsedSec;
         while (accumulatedTime >= fixedDt) {
           const isRaceLocked = gameStateRef.current === 'countdown' || gameStateRef.current === 'menu';
@@ -253,11 +435,21 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           carGroup.rotation.x = THREE.MathUtils.lerp(carGroup.rotation.x, pitchTarget, 8 * elapsedSec);
 
           // 3. High-frequency suspension micro-bumps & road surface vibration feedback
-          const suspensionVibe = Math.sin(Date.now() * 0.045) * 0.006 * speedRatio;
+          const suspensionVibe = Math.sin(runningTime * 45.0) * 0.006 * speedRatio;
           carGroup.position.y += suspensionVibe;
 
-          // rolling wheels
-          const rotDelta = (c.speed * elapsedSec) / 0.38;
+          // rolling wheels with burnout wheelspin simulation on hard launch!
+          let wheelRotationSpeed = c.speed;
+          if (c.id === 'player') {
+            if (controlsRef.current.forward && Math.abs(c.speed) < 15) {
+              wheelRotationSpeed = 35; // simulate wheelspin burnout!
+            }
+          } else {
+            if (Math.abs(c.speed) < 10) {
+              wheelRotationSpeed = 22;
+            }
+          }
+          const rotDelta = (wheelRotationSpeed * elapsedSec) / 0.38;
           if (spinners) {
             spinners.forEach(s => { s.rotation.x += rotDelta; });
           }
@@ -279,8 +471,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           if (gltfModelCache.isLoaded) {
             const hasGltf = carGroup.getObjectByName('gltf_car_model');
             if (!hasGltf) {
-              const modelSource = c.id === 'player' ? gltfModelCache.playerModel : gltfModelCache.aiModel;
+              const modelSource = getCarModelForId(c.id);
               if (modelSource) {
+                // Hide procedural body elements, except pivots/spinners of our dynamic tire assembly
                 carGroup.children.forEach(child => {
                   if (child instanceof THREE.Mesh) {
                     const hasCaliperColor = child.material && 'color' in child.material && (child.material as any).color.getHexString() === 'e74c3c';
@@ -291,6 +484,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                 const bbox = new THREE.Box3().setFromObject(clonedModel);
                 const size = bbox.getSize(new THREE.Vector3());
                 if (size.z > 0) {
+                  // Standardize all supercars back-set length to align with original 4.1 width proportions
                   const sf = 4.1 / size.z;
                   clonedModel.scale.set(sf, sf, sf);
                 } else {
@@ -303,13 +497,34 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                   if (node instanceof THREE.Mesh) {
                     node.castShadow = true;
                     node.receiveShadow = true;
-                    if (node.name.toLowerCase().includes('glass') || node.name.toLowerCase().includes('window')) {
+                    
+                    const nodeName = node.name.toLowerCase();
+                    // Clean duplicate wheels/tires inside the model structure so they don't block our pivoting chassis
+                    if (nodeName.includes('wheel') || nodeName.includes('tire') || nodeName.includes('rim') || nodeName.includes('pneu')) {
+                      node.visible = false;
+                      return;
+                    }
+
+                    // Apply high-end real-time reflection shader properties
+                    if (nodeName.includes('glass') || nodeName.includes('window')) {
                       node.material = new THREE.MeshStandardMaterial({
-                        color: '#08090f', metalness: 0.98, roughness: 0.02, transparent: true, opacity: 0.75, envMap: reflectionTex, envMapIntensity: 2.5
+                        color: '#08090f',
+                        metalness: 0.98,
+                        roughness: 0.02,
+                        transparent: true,
+                        opacity: 0.75,
+                        envMap: reflectionTex,
+                        envMapIntensity: 2.8
                       });
-                    } else if (node.material && 'color' in node.material) {
+                    } else {
+                      // Apply stellar metallic car paint
+                      const origColor = (node.material && 'color' in node.material) ? (node.material as any).color : c.color;
                       node.material = new THREE.MeshStandardMaterial({
-                        color: node.material.color, metalness: 0.9, roughness: 0.08, envMap: reflectionTex, envMapIntensity: 2.2
+                        color: origColor,
+                        roughness: 0.08,
+                        metalness: 0.92,
+                        envMap: reflectionTex,
+                        envMapIntensity: 2.5
                       });
                     }
                   }
@@ -322,7 +537,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           // brake light intensities
           const isBraking = c.id === 'player' ? controlsRef.current.backward : (c.speed < 18 && Math.random() > 0.4);
           const tMat = tailLightMatMap.get(c.id);
-          if (tMat) tMat.color.set(isBraking ? '#ff0036' : '#770010');
+          if (tMat) tMat.color.set(isBraking ? '#ff111a' : '#770010');
 
           // dynamic exhaust nitro cones flares
           carGroup.traverse(child => {
@@ -338,6 +553,64 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
               }
             }
           });
+
+          // Dynamic Ribbon Trail coordinates feeding
+          const lTail = carLeftTailTrails.get(c.id);
+          const rTail = carRightTailTrails.get(c.id);
+          const lEx = carLeftExhaustTrails.get(c.id);
+          const rEx = carRightExhaustTrails.get(c.id);
+
+          if (lTail && rTail) {
+            const cosA = Math.cos(c.angle);
+            const sinA = Math.sin(c.angle);
+            const isTraffic = c.id.startsWith('traffic');
+            const groupScale = isTraffic ? 1.25 : 1.4;
+            
+            // local socket positions for taillights
+            const localLX = -0.55 * groupScale;
+            const localLZ = -1.95 * groupScale;
+            
+            const lx = c.position.x + localLX * cosA + localLZ * sinA;
+            const ly = c.position.y + 0.44 * groupScale;
+            const lz = c.position.z - localLX * sinA + localLZ * cosA;
+            
+            const rx = c.position.x - localLX * cosA + localLZ * sinA;
+            const ry = c.position.y + 0.44 * groupScale;
+            const rz = c.position.z + localLX * sinA + localLZ * cosA;
+            
+            const speedKmh = Math.abs(c.speed) * 3.6;
+            if (speedKmh > 20) {
+              const activeTailColor = isBraking ? '#ff000a' : '#8c010d';
+              lTail.addPoint(new THREE.Vector3(lx, ly, lz), activeTailColor);
+              rTail.addPoint(new THREE.Vector3(rx, ry, rz), activeTailColor);
+            } else {
+              lTail.clear();
+              rTail.clear();
+            }
+
+            // Exhaust Nitro trails
+            if (lEx && rEx) {
+              if (c.isNitroActive && speedKmh > 30) {
+                const exLX = -0.38 * groupScale;
+                const exLZ = -1.92 * groupScale;
+                const activeExColor = Math.random() > 0.45 ? '#00f0ff' : '#7200ff';
+
+                const elx = c.position.x + exLX * cosA + exLZ * sinA;
+                const ely = c.position.y + 0.24 * groupScale;
+                const elz = c.position.z - exLX * sinA + exLZ * cosA;
+                
+                const erx = c.position.x - exLX * cosA + exLZ * sinA;
+                const ery = c.position.y + 0.24 * groupScale;
+                const erz = c.position.z + exLX * sinA + exLZ * cosA;
+
+                lEx.addPoint(new THREE.Vector3(elx, ely, elz), activeExColor);
+                rEx.addPoint(new THREE.Vector3(erx, ery, erz), activeExColor);
+              } else {
+                lEx.clear();
+                rEx.clear();
+              }
+            }
+          }
         }
       });
 
@@ -346,7 +619,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       const posAttr = particlePoints.geometry.getAttribute('position') as THREE.BufferAttribute;
       const colAttr = particlePoints.geometry.getAttribute('color') as THREE.BufferAttribute;
       physicsService.particles.forEach(part => {
-        if (pI < maxParticles) {
+        if (part.active && pI < maxParticles) {
           posAttr.setXYZ(pI, part.position.x, part.position.y, part.position.z);
           const colorObj = new THREE.Color(part.color);
           colAttr.setXYZ(pI, colorObj.r * part.life, colorObj.g * part.life, colorObj.b * part.life);
@@ -400,10 +673,10 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           player.position.z - angleCos * camDist
         );
 
-        // Highly-polished lag tracking: damp transitions sideways/backwards to show slides, follow elevation instantly
-        camera.position.x = THREE.MathUtils.lerp(camera.position.x, targetCamPos.x, 8.5 * elapsedSec);
-        camera.position.y = THREE.MathUtils.lerp(camera.position.y, targetCamPos.y, 14.0 * elapsedSec);
-        camera.position.z = THREE.MathUtils.lerp(camera.position.z, targetCamPos.z, 8.5 * elapsedSec);
+        // Highly-polished lag tracking: damp transitions sideways/backwards to show slides, follow elevation instantly (frame-rate independent)
+        camera.position.x = THREE.MathUtils.lerp(camera.position.x, targetCamPos.x, 1 - Math.exp(-8.5 * elapsedSec));
+        camera.position.y = THREE.MathUtils.lerp(camera.position.y, targetCamPos.y, 1 - Math.exp(-14.0 * elapsedSec));
+        camera.position.z = THREE.MathUtils.lerp(camera.position.z, targetCamPos.z, 1 - Math.exp(-8.5 * elapsedSec));
 
         // Look at coordinates track ahead of the nose of the car to see curves
         const lookAheadX = Math.sin(player.angle) * (3.0 + speedRatio * 4.0);
@@ -416,7 +689,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
         // Dynamic camera banking tilt tied directly to angular velocity
         const targetTilt = -player.angularVelocity * 0.08 * Math.min(1.0, player.speed / 12);
-        const nextUpX = THREE.MathUtils.lerp(camera.up.x, targetTilt, 8.5 * elapsedSec);
+        const nextUpX = THREE.MathUtils.lerp(camera.up.x, targetTilt, 1 - Math.exp(-8.5 * elapsedSec));
         camera.up.set(nextUpX, 1.0, 0);
 
         // Variable frequency camera rattle & rumble intensity controller
@@ -431,7 +704,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         } else {
           // standard road micro-frequency feedback proportional to velocity
           const roadVibe = Math.max(0, speedRatio * 0.025);
-          camShakePower = THREE.MathUtils.lerp(camShakePower, roadVibe, 5.0 * elapsedSec);
+          camShakePower = THREE.MathUtils.lerp(camShakePower, roadVibe, 1 - Math.exp(-5.0 * elapsedSec));
         }
 
         if (camShakePower > 0.001) {
@@ -440,7 +713,14 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           camera.position.z += (Math.random() - 0.5) * camShakePower;
         }
 
-        camera.lookAt(targetLookAt);
+        // Smooth look-at target to eliminate all camera jitter!
+        if (!smoothedLookAtInitialized) {
+          smoothedLookAt.copy(targetLookAt);
+          smoothedLookAtInitialized = true;
+        } else {
+          smoothedLookAt.lerp(targetLookAt, 1 - Math.exp(-15.0 * elapsedSec));
+        }
+        camera.lookAt(smoothedLookAt);
 
         // Project Sunset Lens Flare Coordinates
         if (flareRef.current && camera && renderer) {
@@ -530,6 +810,18 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       lMat.dispose();
       sunLight.dispose();
       ambLight.dispose();
+      
+      skyGeo.dispose();
+      skyMat.dispose();
+      sunDiskGeo.dispose();
+      sunDiskMat.dispose();
+      glowDiskGeo.dispose();
+      glowDiskMat.dispose();
+
+      carLeftTailTrails.forEach(t => t.dispose());
+      carRightTailTrails.forEach(t => t.dispose());
+      carLeftExhaustTrails.forEach(t => t.dispose());
+      carRightExhaustTrails.forEach(t => t.dispose());
     };
   }, [physicsService, trackHelper]);
 

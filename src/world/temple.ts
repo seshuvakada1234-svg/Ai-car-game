@@ -8,10 +8,10 @@ export function buildTemple(scene: THREE.Scene, trackHelper: TrackGeometryHelper
   pagodaMainGroup.position.copy(trackHelper.pagodaPos); 
   
   // High-fidelity Multi-tiered stone plaza foundation for the Pagoda
-  const terraceSlabGeo = new THREE.BoxGeometry(22, 2.5, 22);
-  const terraceSlabMat = new THREE.MeshStandardMaterial({ color: '#5b5d63', roughness: 0.92 });
+  const terraceSlabGeo = new THREE.BoxGeometry(32, 12.0, 32); // significantly thicker and larger - UPDATED!
+  const terraceSlabMat = new THREE.MeshStandardMaterial({ color: '#44464c', roughness: 0.95 });
   const terraceSlab = new THREE.Mesh(terraceSlabGeo, terraceSlabMat);
-  terraceSlab.position.y = -1.25; // Flush the top of slab with the terrain level
+  terraceSlab.position.y = -6.0; // penetrate 6 meters below level for robust anchoring!
   terraceSlab.castShadow = true;
   terraceSlab.receiveShadow = true;
   pagodaMainGroup.add(terraceSlab);

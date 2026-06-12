@@ -68,8 +68,10 @@ export function buildTerrain(scene: THREE.Scene, trackHelper: TrackGeometryHelpe
   scene.add(cloudGroup);
 
   // --- 3. RECONSTRUCT CONTINUOUS HEIGHTMAP TERRAIN ---
-  // Coherent continuous terrain sized 6000x7500 centered around X=200, Z=900 with 110x110 detail vertices
-  const terrainGeo = new THREE.PlaneGeometry(6000, 7500, 110, 110);
+  // Coherent continuous terrain sized 6000x7500 centered around X=200, Z=900
+  const isMobile = typeof window !== 'undefined' && (window.innerWidth < 768 || /Mobi|Android|iPhone/i.test(navigator.userAgent));
+  const segments = isMobile ? 250 : 400;
+  const terrainGeo = new THREE.PlaneGeometry(6000, 7500, segments, segments);
   const posAttr = terrainGeo.attributes.position;
   for (let i = 0; i < posAttr.count; i++) {
     const vx = posAttr.getX(i);
@@ -109,7 +111,7 @@ export function buildTerrain(scene: THREE.Scene, trackHelper: TrackGeometryHelpe
   scene.add(lake);
 
   // --- 5. CANYON GORGE RIVER UNDER BRIDGE ---
-  const riverGeo = new THREE.PlaneGeometry(600, 480);
+  const riverGeo = new THREE.PlaneGeometry(600, 600); // slightly wider to engulf deep walls
   const riverMat = new THREE.MeshStandardMaterial({
     color: '#0b243b', // rapid dark canyon river
     roughness: 0.05,
@@ -119,7 +121,7 @@ export function buildTerrain(scene: THREE.Scene, trackHelper: TrackGeometryHelpe
   });
   const river = new THREE.Mesh(riverGeo, riverMat);
   river.rotation.x = -Math.PI / 2;
-  river.position.set(900, -34.8, 3225);
+  river.position.set(900, -84.8, 3225); // lowered deep into the gorgebed!
   scene.add(river);
 
   return terrain;

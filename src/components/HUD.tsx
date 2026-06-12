@@ -323,8 +323,14 @@ export const HUD: React.FC<HUDProps> = ({
   const minZ = -2600;
   const maxZ = 4000;
 
-  const mapX = (x: number) => 10 + ((x - minX) / (maxX - minX)) * 140;
-  const mapZ = (z: number) => 10 + ((z - minZ) / (maxZ - minZ)) * 140;
+  const mapX = (x: number) => {
+    if (x === undefined || x === null || isNaN(x)) return 80;
+    return 10 + ((x - minX) / (maxX - minX)) * 140;
+  };
+  const mapZ = (z: number) => {
+    if (z === undefined || z === null || isNaN(z)) return 80;
+    return 10 + ((z - minZ) / (maxZ - minZ)) * 140;
+  };
 
   const splinePts = trackHelper.cachedPoints;
   const pathD = splinePts.reduce((acc, pt, idx) => {
@@ -576,18 +582,18 @@ export const HUD: React.FC<HUDProps> = ({
               {opponents.map((car) => (
                 <circle
                   key={car.id}
-                  cx={mapX(car.position.x)}
-                  cy={mapZ(car.position.z)}
+                  cx={mapX(car?.position?.x ?? 0)}
+                  cy={mapZ(car?.position?.z ?? 0)}
                   r="3"
-                  fill={car.color}
+                  fill={car.color || '#ff0000'}
                   stroke="#000000"
                   strokeWidth="0.8"
                 />
               ))}
               {/* Glowing Player dot */}
               <circle
-                cx={mapX(player.position.x)}
-                cy={mapZ(player.position.z)}
+                cx={mapX(player?.position?.x ?? 0)}
+                cy={mapZ(player?.position?.z ?? 0)}
                 r="4.2"
                 fill="#38bdf8"
                 stroke="#ffffff"

@@ -69,24 +69,117 @@ export const TRACK_CONTROL_POINTS: TrackNode[] = [
   { position: { x: -50, y: -1, z: -720 }, width: 24, type: 'straight' },   // 38: Pre-finish gate stretch
 ];
 
+// Deterministic 2D Perlin noise implementation for multi-octave terrain generation
+const grad2D = [
+  [1, 1], [-1, 1], [1, -1], [-1, -1],
+  [1, 0], [-1, 0], [0, 1], [0, -1]
+];
+
+const pTable = new Uint8Array(256);
+for (let i = 0; i < 256; i++) {
+  pTable[i] = i;
+}
+// Deterministic seed LCG shuffling
+let seedLCG = 54321;
+for (let i = 255; i > 0; i--) {
+  seedLCG = (1103515245 * seedLCG + 12345) & 0x7fffffff;
+  const j = seedLCG % (i + 1);
+  const tmp = pTable[i];
+  pTable[i] = pTable[j];
+  pTable[j] = tmp;
+}
+
+const perm = new Uint8Array(512);
+const permGradX = new Float32Array(512);
+const permGradY = new Float32Array(512);
+
+for (let i = 0; i < 512; i++) {
+  const val = pTable[i & 255];
+  perm[i] = val;
+  const g = grad2D[val % 8];
+  permGradX[i] = g[0];
+  permGradY[i] = g[1];
+}
+
+function perlinNoise2d(x: number, y: number): number {
+  const X = Math.floor(x) & 255;
+  const Y = Math.floor(y) & 255;
+
+  const xf = x - Math.floor(x);
+  const yf = y - Math.floor(y);
+
+  const u = xf * xf * xf * (xf * (xf * 6 - 15) + 10);
+  const v = yf * yf * yf * (yf * (yf * 6 - 15) + 10);
+
+  const n00 = permGradX[X + perm[Y]] * xf + permGradY[X + perm[Y]] * yf;
+  const n10 = permGradX[X + 1 + perm[Y]] * (xf - 1) + permGradY[X + 1 + perm[Y]] * yf;
+  const n01 = permGradX[X + perm[Y + 1]] * xf + permGradY[X + perm[Y + 1]] * (yf - 1);
+  const n11 = permGradX[X + 1 + perm[Y + 1]] * (xf - 1) + permGradY[X + 1 + perm[Y + 1]] * (yf - 1);
+
+  const x1 = n00 + u * (n10 - n00);
+  const x2 = n01 + u * (n11 - n01);
+
+  return x1 + v * (x2 - x1);
+}
+
+function noiseFBm(x: number, z: number, octaves: number = 6): number {
+  let total = 0;
+  let frequency = 0.00015; // wide expansive landscapes
+  let amplitude = 1.0;
+  let maxValue = 0;
+
+  for (let i = 0; i < octaves; i++) {
+    total += perlinNoise2d(x * frequency, z * frequency) * amplitude;
+    maxValue += amplitude;
+    amplitude *= 0.5;
+    frequency *= 2.3;
+  }
+
+  return total / maxValue;
+}
+
+// Giant, majestic alpine peaks matching the Forza / Horizon request
+// Perfectly sculpted with smoothstep radial falloff inside getTerrainHeight
+const PEAKS = [
+  { x: -1600, z: -1500, radius: 1100, height: 520 }, // High snow peaks (Zone 9)
+  { x: -2000, z: 800, radius: 1000, height: 490 },  // Alpine ridge
+  { x: 1650, z: -1900, radius: 1150, height: 550 },  // Massive northeast backdrop
+  { x: 2100, z: 1100, radius: 1000, height: 460 },  // Canyon flanks
+  { x: -700, z: 2300, radius: 900, height: 350 },   // Waterfall mountain range
+  { x: 1100, z: 2600, radius: 1050, height: 410 },  // Village pass peak
+  { x: 110, y: 10, z: 3100, radius: 450, height: 260 }, // Solid rock massif encasing neon tunnel portals
+];
+
 // High fidelity fully-integrated terrain height function with smooth carving around road splines
 export function getTerrainHeight(x: number, z: number, trackHelper?: any): number {
   const distFromCenter = Math.sqrt(x * x + z * z);
   
-  // 1. Base Multi-Layered Rock Coherent Harmonics
-  const h1 = Math.sin(x * 0.0016) * Math.cos(z * 0.0018) * 115;
-  const h2 = Math.cos(x * 0.0048) * Math.sin(z * 0.0042) * 50;
-  const h3 = Math.sin(x * 0.011) * Math.sin(z * 0.009) * 14;
-  let baseHeight = h1 + h2 + h3;
+  // 1. Continuous Multi-Octave Perlin noise base (6 octaves for granular valleys and hills)
+  const rawNoise = noiseFBm(x, z, 6);
+  let baseHeight = rawNoise * 145.0; // scale noise range beautifully
   
-  // Create beautiful, natural surrounding alpine ridge barriers
-  if (distFromCenter > 360) {
-    baseHeight += (distFromCenter - 360) * 0.42;
+  // Create beautiful, natural surrounding alpine ridge barriers (outer edges)
+  if (distFromCenter > 380) {
+    baseHeight += (distFromCenter - 380) * 0.45;
   } else {
-    baseHeight += (distFromCenter - 360) * 0.06;
+    baseHeight += (distFromCenter - 380) * 0.05;
   }
+
+  // 2. Sculpt Actual Mountain Masses (Smoothstep Radial Falloff)
+  let mountainHeight = 0;
+  for (const p of PEAKS) {
+    const dx = x - p.x;
+    const dz = z - p.z;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    if (dist < p.radius) {
+      const t = dist / p.radius;
+      const falloff = 1.0 - t * t * (3 - 2 * t); // smoothstep radial blend
+      mountainHeight += p.height * Math.pow(falloff, 1.6);
+    }
+  }
+  baseHeight += mountainHeight;
   
-  // 2. Zone Specific Geography Sculptures
+  // 3. Zone Specific Geography Sculptures
   // Emerald Jade Lake Bed (centered around Zone 9 transition)
   const distToLake = Math.sqrt(Math.pow(x - 50, 2) + Math.pow(z + 120, 2));
   if (distToLake < 250) {
@@ -95,57 +188,78 @@ export function getTerrainHeight(x: number, z: number, trackHelper?: any): numbe
     baseHeight = THREE.MathUtils.lerp(baseHeight, -10.2, smoothFactor);
   }
 
-  // Giant Canyon Gorge (under the suspension bridge, z: 2900 to 3550)
-  if (z > 2900 && z < 3550) {
+  // Spectacular Deep Canyon Gorge under the suspension bridge (z: 2900 to 3550, x: center around 900)
+  if (z > 2850 && z < 3600) {
     const distToCanyonCenter = Math.abs(x - 900); 
-    if (distToCanyonCenter < 220) {
-      const canyonFactor = Math.cos((distToCanyonCenter / 220) * Math.PI / 2);
-      const sFactor = canyonFactor * canyonFactor * (3 - 2 * canyonFactor);
-      baseHeight = THREE.MathUtils.lerp(baseHeight, -35.0 + Math.sin(z * 0.02) * 4, sFactor);
+    if (distToCanyonCenter < 380) {
+      const uCanyon = distToCanyonCenter / 380;
+      const sFactor = 1.0 - uCanyon * uCanyon * (3 - 2 * uCanyon); // smoothstep vertical drop
+      const canyonFloor = -85.0 + Math.sin(z * 0.05) * 6; // deep rocky bottom!
+      baseHeight = THREE.MathUtils.lerp(baseHeight, canyonFloor, sFactor);
     }
   }
 
-  // Waterfall valley beds (near coordinates x: -150, z: 2400)
+  // Waterfall valley pool bed (near coordinates x: -150, z: 2400)
   const distToWaterfall = Math.sqrt(Math.pow(x + 150, 2) + Math.pow(z - 2400, 2));
-  if (distToWaterfall < 240) {
-    const wfFactor = Math.cos(Math.min(1.0, distToWaterfall / 240) * Math.PI / 2);
-    const sFactor = wfFactor * wfFactor * (3 - 2 * wfFactor);
-    baseHeight = THREE.MathUtils.lerp(baseHeight, -22.5, sFactor);
+  if (distToWaterfall < 340) {
+    const wfFactor = Math.min(1.0, distToWaterfall / 340);
+    const sFactor = 1.0 - wfFactor * wfFactor * (3 - 2 * wfFactor);
+    baseHeight = THREE.MathUtils.lerp(baseHeight, -35.0, sFactor * 0.95);
   }
 
-  // 3. Dynamic Road Corridors Carving & Tunnel Mountain Solidness
+  // 4. Dynamic Road Corridors Carving & Tunnel Mountain Solidness
   if (trackHelper) {
     const info = trackHelper.getNearestTrackInfo(new THREE.Vector3(x, 0, z));
     const rType = trackHelper.getRoadTypeAt(info.progress);
-    
+    const width = trackHelper.getRoadWidthAt(info.progress);
+    const halfWidth = width / 2;
+    const flatZone = halfWidth + 1.25; // zero-clipping road shoulder
+    const blendZone = 36.0;            // smooth shoulder ramp
+
     if (rType === 'tunnel') {
-      // Create majestic solid rock tunnel arch above the tube mesh!
-      // This ensures we have a real mountain side to tunnel through.
-      if (info.distanceToTrack < 30) {
-        const tunnelVaultTop = info.nearestPoint.y + 18;
-        if (baseHeight < tunnelVaultTop) {
-          baseHeight = THREE.MathUtils.lerp(tunnelVaultTop, baseHeight, info.distanceToTrack / 30);
+      // Build an extremely thick solid rock dome of 35-50m above the tunnel curve
+      if (info.distanceToTrack < 75) {
+        const blend = info.distanceToTrack / 75;
+        const s = blend * blend * (3 - 2 * blend);
+        
+        const mountainTopY = info.nearestPoint.y + 45.0; // 45m thick rock layers!
+        const isNearMouth = (info.progress < 0.41) || (info.progress > 0.49);
+        
+        let targetMountainY = mountainTopY;
+        if (isNearMouth) {
+          const mouthDist = Math.min(Math.abs(info.progress - 0.40), Math.abs(info.progress - 0.50));
+          const mouthBlend = Math.min(1.0, mouthDist * 20.0);
+          targetMountainY = THREE.MathUtils.lerp(info.nearestPoint.y + 5.5, mountainTopY, mouthBlend);
         }
+
+        baseHeight = THREE.MathUtils.lerp(targetMountainY, baseHeight, s);
       }
     } else if (rType !== 'bridge') {
-      // Settle standard ground shoulder beds perfectly level with spline
-      if (info.distanceToTrack < 48) {
-        const blend = Math.min(1.0, info.distanceToTrack / 48);
-        const s = blend * blend * (3 - 2 * blend); // smooth S-curve
-        const targetY = info.nearestPoint.y - 0.4;
-        baseHeight = THREE.MathUtils.lerp(targetY, baseHeight, s);
+      // Standard ground shoulder beds carved level with spline
+      if (info.distanceToTrack < flatZone) {
+        baseHeight = info.nearestPoint.y - 0.18;
+      } else if (info.distanceToTrack < flatZone + blendZone) {
+        const t = (info.distanceToTrack - flatZone) / blendZone;
+        const s = t * t * (3 - 2 * t);
+        const roadBedY = info.nearestPoint.y - 0.18;
+        baseHeight = THREE.MathUtils.lerp(roadBedY, baseHeight, s);
       }
     }
   }
 
   // Final clamp to prevent dropping below map bedrock level
-  return Math.max(-42, baseHeight);
+  return Math.max(-95.0, baseHeight);
 }
+
+// File-scope scratchpad vectors to avoid garbage collection memory leaks in high-frequency loops
+const SCRATCH_POS_A = new THREE.Vector3();
+const SCRATCH_POS_B = new THREE.Vector3();
 
 export class TrackGeometryHelper {
   curve: THREE.CatmullRomCurve3;
   cachedPoints: THREE.Vector3[];
   checkpoints: Checkpoint[] = [];
+  length: number;
   
   // High fidelity scenery distribution structures
   trees: { position: THREE.Vector3; scale: number; type: number }[] = [];
@@ -172,8 +286,16 @@ export class TrackGeometryHelper {
     );
     this.curve = new THREE.CatmullRomCurve3(threePoints, true, 'centripetal');
     
-    // Smooth 400 spacing segments (highly detailed, frame-stable caching)
-    this.cachedPoints = this.curve.getSpacedPoints(400);
+    // Smooth 2000 spacing segments (highly detailed, frame-stable caching)
+    this.cachedPoints = this.curve.getSpacedPoints(2000);
+
+    // Calculate accurate analytical track spline length by summing segments
+    let calculatedLength = 0;
+    for (let idx = 0; idx < this.cachedPoints.length - 1; idx++) {
+      calculatedLength += this.cachedPoints[idx].distanceTo(this.cachedPoints[idx + 1]);
+    }
+    calculatedLength += this.cachedPoints[this.cachedPoints.length - 1].distanceTo(this.cachedPoints[0]);
+    this.length = calculatedLength;
 
     // Dyn-align gates and landmarks on actual track spline points
     const startPt = this.curve.getPointAt(0.0);
@@ -206,6 +328,7 @@ export class TrackGeometryHelper {
 
   // Get dynamic road width
   getRoadWidthAt(u: number): number {
+    if (u === undefined || u === null || isNaN(u)) u = 0;
     u = u % 1.0;
     if (u < 0) u += 1.0;
 
@@ -222,6 +345,7 @@ export class TrackGeometryHelper {
 
   // Get local road segment type matching structural code
   getRoadTypeAt(u: number): string {
+    if (u === undefined || u === null || isNaN(u)) u = 0;
     u = (u % 1.0 + 1.0) % 1.0;
     const size = TRACK_CONTROL_POINTS.length;
     const index = Math.floor(u * size) % size;
@@ -230,51 +354,96 @@ export class TrackGeometryHelper {
 
   // Fast math projecting player positions directly upon closest spline segment
   getNearestTrackInfo(pos: THREE.Vector3) {
-    let minDistance = Infinity;
-    let nearestProgress = 0;
-    let nearestPoint = new THREE.Vector3();
-    const samples = 400;
-
-    for (let i = 0; i < samples; i++) {
-      const u = i / samples;
-      const pt = this.cachedPoints[i];
-      const distSq = pos.distanceToSquared(pt);
-      if (distSq < minDistance) {
-        minDistance = distSq;
-        nearestProgress = u;
-        nearestPoint = pt;
+    try {
+      if (!pos || typeof pos.distanceToSquared !== 'function' || isNaN(pos.x) || isNaN(pos.y) || isNaN(pos.z)) {
+        return {
+          nearestPoint: new THREE.Vector3(),
+          progress: 0,
+          tangent: new THREE.Vector3(0, 0, 1),
+          normal: new THREE.Vector3(1, 0, 0),
+          width: 24,
+          sideOffset: 0,
+          distanceToTrack: 0,
+        };
       }
-    }
+      let minDistance = Infinity;
+      let nearestProgress = 0;
+      let nearestPoint = new THREE.Vector3();
+      
+      const pointsLength = this.cachedPoints ? this.cachedPoints.length : 0;
+      const samples = Math.min(2000, pointsLength);
 
-    let preciseProgress = nearestProgress;
-    const searchStep = 1 / (samples * 5);
-    for (let step = -4; step <= 4; step++) {
-      const u = (nearestProgress + step * searchStep + 1.0) % 1.0;
-      const pt = this.curve.getPointAt(u);
-      const distSq = pos.distanceToSquared(pt);
-      if (distSq < minDistance) {
-        minDistance = distSq;
-        preciseProgress = u;
-        nearestPoint = pt;
+      if (samples > 0) {
+        for (let i = 0; i < samples; i++) {
+          const u = i / samples;
+          const pt = this.cachedPoints[i];
+          if (!pt) continue;
+          const distSq = pos.distanceToSquared(pt);
+          if (distSq < minDistance) {
+            minDistance = distSq;
+            nearestProgress = u;
+            nearestPoint.copy(pt);
+          }
+        }
+      } else {
+        // Fallback if cached points are missing
+        const startPt = this.curve ? this.curve.getPointAt(0) : new THREE.Vector3();
+        if (startPt) {
+          nearestPoint.copy(startPt);
+          minDistance = pos.distanceToSquared(nearestPoint);
+        }
       }
+
+      let preciseProgress = nearestProgress;
+      const searchStep = 1 / (Math.max(samples, 1) * 5);
+      const tempPt = SCRATCH_POS_A;
+      if (this.curve && typeof this.curve.getPointAt === 'function') {
+        for (let step = -4; step <= 4; step++) {
+          const u = (nearestProgress + step * searchStep + 1.0) % 1.0;
+          this.curve.getPointAt(u, tempPt);
+          const distSq = pos.distanceToSquared(tempPt);
+          if (distSq < minDistance) {
+            minDistance = distSq;
+            preciseProgress = u;
+            nearestPoint.copy(tempPt);
+          }
+        }
+      }
+
+      const tangent = new THREE.Vector3();
+      if (this.curve && typeof this.curve.getTangentAt === 'function') {
+        this.curve.getTangentAt(preciseProgress, tangent);
+      } else {
+        tangent.set(0, 0, 1);
+      }
+      tangent.normalize();
+      const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
+      const width = this.getRoadWidthAt(preciseProgress);
+      
+      const toCar = SCRATCH_POS_B.subVectors(pos, nearestPoint);
+      const sideOffset = toCar.dot(normal);
+
+      return {
+        nearestPoint,
+        progress: preciseProgress,
+        tangent,
+        normal,
+        width,
+        sideOffset,
+        distanceToTrack: Math.sqrt(minDistance),
+      };
+    } catch (err) {
+      console.warn("Exception caught in getNearestTrackInfo, returning safe fallback values:", err);
+      return {
+        nearestPoint: new THREE.Vector3(),
+        progress: 0,
+        tangent: new THREE.Vector3(0, 0, 1),
+        normal: new THREE.Vector3(1, 0, 0),
+        width: 24,
+        sideOffset: 0,
+        distanceToTrack: 0,
+      };
     }
-
-    const tangent = this.curve.getTangentAt(preciseProgress).normalize();
-    const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
-    const width = this.getRoadWidthAt(preciseProgress);
-    
-    const toCar = new THREE.Vector3().subVectors(pos, nearestPoint);
-    const sideOffset = toCar.dot(normal);
-
-    return {
-      nearestPoint,
-      progress: preciseProgress,
-      tangent,
-      normal,
-      width,
-      sideOffset,
-      distanceToTrack: Math.sqrt(minDistance),
-    };
   }
 
   // Procedural distribution of scenery matching 10 distinct thematic zones

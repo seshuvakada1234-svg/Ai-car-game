@@ -207,7 +207,7 @@ export default function App() {
   };
 
   const currentPl = cars.find(c => c.id === 'player') || cars[0];
-  const currentOpponents = cars.filter(c => c.id !== 'player');
+  const currentOpponents = cars.filter(c => c.id !== 'player' && !c.id.startsWith('traffic'));
 
   return (
     <div id="ai-race-root" className="relative w-screen h-screen overflow-hidden bg-slate-950 flex flex-col">
