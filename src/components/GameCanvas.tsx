@@ -1,0 +1,559 @@
+import React, { useEffect, useRef } from 'react';
+import * as THREE from 'three';
+import { CarState, ControlsState } from '../types';
+import { GamePhysicsService } from '../utils/gamePhysics';
+import { TrackGeometryHelper } from '../utils/track';
+import { gltfModelCache, preloadGLTFAssets, buildProceduralCar } from '../world/procedural';
+import { DragonTrackWorld } from '../world/DragonTrackWorld';
+
+interface GameCanvasProps {
+  cars: CarState[];
+  playerControls: ControlsState;
+  physicsService: GamePhysicsService;
+  trackHelper: TrackGeometryHelper;
+  isPaused: boolean;
+  gameState: string;
+  onFinishRace: () => void;
+  onTick: (updatedCars: CarState[]) => void;
+}
+
+export const GameCanvas: React.FC<GameCanvasProps> = ({
+  cars,
+  playerControls,
+  physicsService,
+  trackHelper,
+  isPaused,
+  gameState,
+  onFinishRace,
+  onTick,
+}) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const flareRef = useRef<HTMLDivElement>(null);
+  const speedVignetteRef = useRef<HTMLDivElement>(null);
+
+  const carsRef = useRef<CarState[]>(cars);
+  const controlsRef = useRef<ControlsState>(playerControls);
+  const gameStateRef = useRef<string>(gameState);
+  const isPausedRef = useRef<boolean>(isPaused);
+  const onFinishRaceRef = useRef<() => void>(onFinishRace);
+  const onTickRef = useRef<(updatedCars: CarState[]) => void>(onTick);
+
+  useEffect(() => { carsRef.current = cars; }, [cars]);
+  useEffect(() => { controlsRef.current = playerControls; }, [playerControls]);
+  useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
+  useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
+  useEffect(() => { onFinishRaceRef.current = onFinishRace; }, [onFinishRace]);
+  useEffect(() => { onTickRef.current = onTick; }, [onTick]);
+
+  useEffect(() => {
+    if (!canvasRef.current || !containerRef.current) return;
+
+    // Trigger asset preloading asynchronously
+    preloadGLTFAssets();
+
+    // --- 1. INITIALIZE THREE.JS SCENE, CAMERA, RENDERER ---
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(62, 1, 0.4, 1800);
+    const renderer = new THREE.WebGLRenderer({
+      canvas: canvasRef.current,
+      antialias: true,
+      powerPreference: 'high-performance',
+    });
+    renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+    // --- 2. ENVIRONMENT MAP ---
+    const createReflectionMap = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 128; canvas.height = 128;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        const grad = ctx.createLinearGradient(0, 0, 0, 128);
+        grad.addColorStop(0.0, '#0a1d37');
+        grad.addColorStop(0.35, '#2e114d');
+        grad.addColorStop(0.65, '#f3501a');
+        grad.addColorStop(0.82, '#ffcc00');
+        grad.addColorStop(1.0, '#4a2503');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, 128, 128);
+      }
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.mapping = THREE.EquirectangularReflectionMapping;
+      return tex;
+    };
+    const reflectionTex = createReflectionMap();
+
+    // --- 3. DYNAMIC WORLD GEOMETRIES ---
+    const dragonWorld = new DragonTrackWorld(scene, trackHelper);
+
+    // --- 4. CAR MODEL GENERATIONS ---
+    const carGroupMap = new Map<string, THREE.Group>();
+    const carPivotsMap = new Map<string, THREE.Group[]>();
+    const carSpinnersMap = new Map<string, THREE.Group[]>();
+    const tailLightMatMap = new Map<string, THREE.MeshBasicMaterial>();
+    const paintMatMap = new Map<string, THREE.MeshStandardMaterial>();
+
+    carsRef.current.forEach(c => {
+      const carData = buildProceduralCar(c, reflectionTex, scene);
+      carGroupMap.set(c.id, carData.group);
+      carPivotsMap.set(c.id, carData.pivots);
+      carSpinnersMap.set(c.id, carData.spinners);
+      tailLightMatMap.set(c.id, carData.tailLightMat);
+      paintMatMap.set(c.id, carData.paintMat);
+    });
+
+    // --- 5. LIGHTS ---
+    const sunLight = new THREE.DirectionalLight('#ffc891', 3.2);
+    sunLight.position.set(120, 240, 80);
+    sunLight.castShadow = true;
+    sunLight.shadow.mapSize.width = 1024;
+    sunLight.shadow.mapSize.height = 1024;
+    sunLight.shadow.camera.near = 10;
+    sunLight.shadow.camera.far = 400;
+    const shadowSize = 100;
+    sunLight.shadow.camera.left = -shadowSize;
+    sunLight.shadow.camera.right = shadowSize;
+    sunLight.shadow.camera.top = shadowSize;
+    sunLight.shadow.camera.bottom = -shadowSize;
+    scene.add(sunLight);
+
+    const ambLight = new THREE.HemisphereLight('#0d2149', '#4d2d14', 1.0);
+    scene.add(ambLight);
+
+    // Track street lights
+    trackHelper.lights.forEach(lite => {
+      const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8), new THREE.MeshBasicMaterial({ color: lite.color }));
+      bulb.position.copy(lite.position);
+      scene.add(bulb);
+
+      const pl = new THREE.PointLight(lite.color, lite.intensity, 22, 0.5);
+      pl.position.copy(lite.position);
+      scene.add(pl);
+    });
+
+    // --- 6. PARTICLES ---
+    const maxParticles = 600;
+    const partGeo = new THREE.BufferGeometry();
+    const partPositions = new Float32Array(maxParticles * 3);
+    const partColors = new Float32Array(maxParticles * 3);
+    partGeo.setAttribute('position', new THREE.BufferAttribute(partPositions, 3));
+    partGeo.setAttribute('color', new THREE.BufferAttribute(partColors, 3));
+
+    const pTexture = new THREE.TextureLoader().load(
+      'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><circle cx="16" cy="16" r="14" fill="white"/></svg>'
+    );
+    const partMat = new THREE.PointsMaterial({
+      size: 1.0,
+      vertexColors: true,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      map: pTexture,
+    });
+    const particlePoints = new THREE.Points(partGeo, partMat);
+    scene.add(particlePoints);
+
+    // Speed Lines Effect
+    const speedLinesCount = 35;
+    const linesGroup = new THREE.Group();
+    const lGeo = new THREE.BufferGeometry();
+    lGeo.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, -4], 3));
+    const lMat = new THREE.LineBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0 });
+    const linesPool: THREE.Line[] = [];
+    for (let i = 0; i < speedLinesCount; i++) {
+      const lineMesh = new THREE.Line(lGeo, lMat.clone());
+      linesGroup.add(lineMesh);
+      linesPool.push(lineMesh);
+    }
+    camera.add(linesGroup);
+    scene.add(camera);
+
+    // --- 7. RENDERING FEEDBACK LOOP ---
+    let animationId = 0;
+    let oldTime = performance.now();
+    let accumulatedTime = 0;
+    const fixedDt = 1 / 60;
+    let camShakePower = 0;
+
+    const tick = () => {
+      animationId = requestAnimationFrame(tick);
+      const currentTime = performance.now();
+      let elapsedSec = (currentTime - oldTime) / 1000;
+      if (elapsedSec > 0.1) elapsedSec = 0.1;
+      oldTime = currentTime;
+
+      const currentCars = [...carsRef.current];
+
+      if (!isPausedRef.current && gameStateRef.current !== 'completed') {
+        accumulatedTime += elapsedSec;
+        while (accumulatedTime >= fixedDt) {
+          const isRaceLocked = gameStateRef.current === 'countdown' || gameStateRef.current === 'menu';
+          const playerCar = currentCars.find(c => c.id === 'player');
+          if (playerCar) {
+            physicsService.updateCar(playerCar, fixedDt, controlsRef.current, isRaceLocked);
+            physicsService.generateExhaustParticles(playerCar, fixedDt);
+          }
+          currentCars.forEach(c => {
+            if (c.isAI) {
+              physicsService.updateAICar(c, fixedDt, currentCars);
+              physicsService.generateExhaustParticles(c, fixedDt);
+            }
+          });
+          physicsService.evaluatePositionsRanks(currentCars);
+          physicsService.updateParticles(fixedDt);
+          accumulatedTime -= fixedDt;
+        }
+
+        onTickRef.current(currentCars);
+
+        const player = currentCars.find(c => c.id === 'player');
+        if (player && player.isFinished && gameStateRef.current === 'racing') {
+          onFinishRaceRef.current();
+        }
+      }
+
+      // Live animated elements (waterfalls, victory fireworks, grandstands)
+      const playerObj = currentCars.find(c => c.id === 'player');
+      const isFinished = playerObj ? playerObj.isFinished : false;
+      const rank = playerObj ? playerObj.racePosition : 1;
+      dragonWorld.update(elapsedSec, trackHelper, rank, isFinished);
+
+      // Animate Vehicles
+      currentCars.forEach(c => {
+        const carGroup = carGroupMap.get(c.id);
+        const pivots = carPivotsMap.get(c.id);
+        const spinners = carSpinnersMap.get(c.id);
+
+        if (carGroup) {
+          carGroup.position.set(c.position.x, c.position.y, c.position.z);
+          carGroup.rotation.y = c.angle;
+
+          // Premium speed-sensitive suspension body roll, weight transfer & road micro-vibrations
+          const speedRatio = Math.min(1.0, Math.abs(c.speed) / 78);
+          
+          // 1. Suspension Body Roll opposite to lateral turn G-force
+          const rollTarget = -c.angularVelocity * 0.022 * speedRatio;
+          carGroup.rotation.z = THREE.MathUtils.lerp(carGroup.rotation.z, rollTarget, 10 * elapsedSec);
+
+          // 2. Headlight Squat (Accel) / Dive (Brake) pitch weight transfer
+          let pitchTarget = 0;
+          if (c.id === 'player') {
+            if (controlsRef.current.forward) {
+              pitchTarget = -0.018 * speedRatio; // Rear squat
+            } else if (controlsRef.current.backward) {
+              pitchTarget = 0.026 * speedRatio;  // Front nose dive
+            }
+          } else {
+            // AI auto pitch based on relative speed
+            pitchTarget = -0.008 * speedRatio;
+          }
+          carGroup.rotation.x = THREE.MathUtils.lerp(carGroup.rotation.x, pitchTarget, 8 * elapsedSec);
+
+          // 3. High-frequency suspension micro-bumps & road surface vibration feedback
+          const suspensionVibe = Math.sin(Date.now() * 0.045) * 0.006 * speedRatio;
+          carGroup.position.y += suspensionVibe;
+
+          // rolling wheels
+          const rotDelta = (c.speed * elapsedSec) / 0.38;
+          if (spinners) {
+            spinners.forEach(s => { s.rotation.x += rotDelta; });
+          }
+
+          // steering pivot angles
+          if (pivots && pivots.length >= 2) {
+            let steerOffset = 0;
+            if (c.id === 'player') {
+              const steerVal = c.steerValue !== undefined ? c.steerValue : (controlsRef.current.steerValue !== undefined ? controlsRef.current.steerValue : (controlsRef.current.left ? 1 : (controlsRef.current.right ? -1 : 0)));
+              steerOffset = steerVal * 0.36;
+            } else {
+              steerOffset = THREE.MathUtils.clamp((c.steerValue !== undefined ? c.steerValue : c.angularVelocity * 0.4), -0.36, 0.36);
+            }
+            pivots[0].rotation.y = THREE.MathUtils.lerp(pivots[0].rotation.y, steerOffset, 0.18);
+            pivots[1].rotation.y = THREE.MathUtils.lerp(pivots[1].rotation.y, steerOffset, 0.18);
+          }
+
+          // GLTF dynamic supercar models hot swap
+          if (gltfModelCache.isLoaded) {
+            const hasGltf = carGroup.getObjectByName('gltf_car_model');
+            if (!hasGltf) {
+              const modelSource = c.id === 'player' ? gltfModelCache.playerModel : gltfModelCache.aiModel;
+              if (modelSource) {
+                carGroup.children.forEach(child => {
+                  if (child instanceof THREE.Mesh) {
+                    const hasCaliperColor = child.material && 'color' in child.material && (child.material as any).color.getHexString() === 'e74c3c';
+                    if (!hasCaliperColor) child.visible = false;
+                  }
+                });
+                const clonedModel = modelSource.clone();
+                const bbox = new THREE.Box3().setFromObject(clonedModel);
+                const size = bbox.getSize(new THREE.Vector3());
+                if (size.z > 0) {
+                  const sf = 4.1 / size.z;
+                  clonedModel.scale.set(sf, sf, sf);
+                } else {
+                  clonedModel.scale.set(1.5, 1.5, 1.5);
+                }
+                clonedModel.position.set(0, 0.1, 0);
+                clonedModel.name = 'gltf_car_model';
+                
+                clonedModel.traverse(node => {
+                  if (node instanceof THREE.Mesh) {
+                    node.castShadow = true;
+                    node.receiveShadow = true;
+                    if (node.name.toLowerCase().includes('glass') || node.name.toLowerCase().includes('window')) {
+                      node.material = new THREE.MeshStandardMaterial({
+                        color: '#08090f', metalness: 0.98, roughness: 0.02, transparent: true, opacity: 0.75, envMap: reflectionTex, envMapIntensity: 2.5
+                      });
+                    } else if (node.material && 'color' in node.material) {
+                      node.material = new THREE.MeshStandardMaterial({
+                        color: node.material.color, metalness: 0.9, roughness: 0.08, envMap: reflectionTex, envMapIntensity: 2.2
+                      });
+                    }
+                  }
+                });
+                carGroup.add(clonedModel);
+              }
+            }
+          }
+
+          // brake light intensities
+          const isBraking = c.id === 'player' ? controlsRef.current.backward : (c.speed < 18 && Math.random() > 0.4);
+          const tMat = tailLightMatMap.get(c.id);
+          if (tMat) tMat.color.set(isBraking ? '#ff0036' : '#770010');
+
+          // dynamic exhaust nitro cones flares
+          carGroup.traverse(child => {
+            if (child.name === 'nitro_flame' && child instanceof THREE.Mesh) {
+              const fMat = child.material as THREE.MeshBasicMaterial;
+              if (c.isNitroActive) {
+                child.scale.set(1, 1, 1.2 + Math.random() * 0.9);
+                fMat.opacity = 0.88;
+                fMat.color.set(Math.random() > 0.45 ? '#00eaff' : '#6a00ff');
+              } else {
+                child.scale.set(1, 1, 0.1);
+                fMat.opacity = 0;
+              }
+            }
+          });
+        }
+      });
+
+      // Sparks / exhaust particles attributes mapping
+      let pI = 0;
+      const posAttr = particlePoints.geometry.getAttribute('position') as THREE.BufferAttribute;
+      const colAttr = particlePoints.geometry.getAttribute('color') as THREE.BufferAttribute;
+      physicsService.particles.forEach(part => {
+        if (pI < maxParticles) {
+          posAttr.setXYZ(pI, part.position.x, part.position.y, part.position.z);
+          const colorObj = new THREE.Color(part.color);
+          colAttr.setXYZ(pI, colorObj.r * part.life, colorObj.g * part.life, colorObj.b * part.life);
+          pI++;
+        }
+      });
+      for (let j = pI; j < maxParticles; j++) {
+        posAttr.setXYZ(j, 9999, 9999, 9999);
+      }
+      posAttr.needsUpdate = true;
+      colAttr.needsUpdate = true;
+
+      // Chase camera tracking
+      const player = currentCars.find(c => c.id === 'player');
+      if (player) {
+        // --- ASPHALT 8 DYNAMIC CHASE CAMERA SYSTEM ---
+        const speedKmh = Math.abs(player.speed) * 3.6;
+        const velocityMagnitude = Math.sqrt(player.velocity.x ** 2 + player.velocity.z ** 2);
+        const speedRatio = Math.min(1.0, speedKmh / 320);
+
+        // Dynamic FOV linked directly to vehicle speed, with a warp stretch for nitro boosts
+        let targetFOV = 62 + speedRatio * 18;
+        if (player.isNitroActive) {
+          targetFOV += 15.0; // Warp-speed compression field of view (up to ~95 FOV)
+        }
+        camera.fov = THREE.MathUtils.lerp(camera.fov, targetFOV, 10.0 * elapsedSec);
+        camera.updateProjectionMatrix();
+
+        // Camera back-set distance and height reacts dynamically to speed & boosts
+        let camDist = 5.2 + speedRatio * 1.6;
+        let camHeight = 2.4 - speedRatio * 0.45;
+        
+        if (player.isNitroActive) {
+          camDist += 1.0;
+          camHeight -= 0.15;
+        }
+
+        // Broadside drifting lateral offset: swivels camera in direction of the slide!
+        let driftLateralOffset = 0;
+        if (player.isDrifting) {
+          // Angle shifts gracefully sideways matching slide G-force swings
+          driftLateralOffset = player.angularVelocity * 0.38;
+        }
+
+        const angleCos = Math.cos(player.angle + driftLateralOffset);
+        const angleSin = Math.sin(player.angle + driftLateralOffset);
+
+        const targetCamPos = new THREE.Vector3(
+          player.position.x - angleSin * camDist,
+          player.position.y + camHeight,
+          player.position.z - angleCos * camDist
+        );
+
+        // Highly-polished lag tracking: damp transitions sideways/backwards to show slides, follow elevation instantly
+        camera.position.x = THREE.MathUtils.lerp(camera.position.x, targetCamPos.x, 8.5 * elapsedSec);
+        camera.position.y = THREE.MathUtils.lerp(camera.position.y, targetCamPos.y, 14.0 * elapsedSec);
+        camera.position.z = THREE.MathUtils.lerp(camera.position.z, targetCamPos.z, 8.5 * elapsedSec);
+
+        // Look at coordinates track ahead of the nose of the car to see curves
+        const lookAheadX = Math.sin(player.angle) * (3.0 + speedRatio * 4.0);
+        const lookAheadZ = Math.cos(player.angle) * (3.0 + speedRatio * 4.0);
+        const targetLookAt = new THREE.Vector3(
+          player.position.x + lookAheadX,
+          player.position.y + 0.8,
+          player.position.z + lookAheadZ
+        );
+
+        // Dynamic camera banking tilt tied directly to angular velocity
+        const targetTilt = -player.angularVelocity * 0.08 * Math.min(1.0, player.speed / 12);
+        const nextUpX = THREE.MathUtils.lerp(camera.up.x, targetTilt, 8.5 * elapsedSec);
+        camera.up.set(nextUpX, 1.0, 0);
+
+        // Variable frequency camera rattle & rumble intensity controller
+        const isDrifting = Math.abs(player.angularVelocity) > 2.0;
+
+        if (player.isNitroActive) {
+          camShakePower = 0.22; // hyper speed rumble
+        } else if (controlsRef.current.forward && player.speed < 24) {
+          camShakePower = Math.max(0.045, camShakePower - elapsedSec * 0.35); // launch tire spin rumble
+        } else if (player.isDrifting && speedKmh > 50) {
+          camShakePower = Math.min(0.12, camShakePower + elapsedSec * 0.45); // sliding tire gravel rumble
+        } else {
+          // standard road micro-frequency feedback proportional to velocity
+          const roadVibe = Math.max(0, speedRatio * 0.025);
+          camShakePower = THREE.MathUtils.lerp(camShakePower, roadVibe, 5.0 * elapsedSec);
+        }
+
+        if (camShakePower > 0.001) {
+          camera.position.x += (Math.random() - 0.5) * camShakePower;
+          camera.position.y += (Math.random() - 0.5) * camShakePower;
+          camera.position.z += (Math.random() - 0.5) * camShakePower;
+        }
+
+        camera.lookAt(targetLookAt);
+
+        // Project Sunset Lens Flare Coordinates
+        if (flareRef.current && camera && renderer) {
+          const wOff = containerRef.current?.clientWidth || 800;
+          const hOff = containerRef.current?.clientHeight || 600;
+          const sunPos = new THREE.Vector3(120, 240, 80);
+          const sunProj = sunPos.clone().project(camera);
+          const isBehind = sunProj.z > 1.0;
+
+          if (isBehind) {
+            flareRef.current.style.opacity = '0';
+          } else {
+            const sunX = (sunProj.x * 0.5 + 0.5) * wOff;
+            const sunY = (-sunProj.y * 0.5 + 0.5) * hOff;
+            const inBounds = sunX >= 0 && sunX <= wOff && sunY >= 0 && sunY <= hOff;
+
+            if (inBounds) {
+              flareRef.current.style.opacity = '1';
+              const dx = (wOff / 2) - sunX;
+              const dy = (hOff / 2) - sunY;
+              const elements = flareRef.current.children;
+              if (elements.length >= 6) {
+                const offsets = [0, 0.22, 0.45, 0.72, 0.95, 1.25];
+                const scales = [1.0, 0.4, 0.25, 0.65, 0.9, 1.45];
+                for (let i = 0; i < 6; i++) {
+                  const el = elements[i] as HTMLDivElement;
+                  el.style.transform = `translate(-50%, -50%) translate(${sunX + dx * offsets[i]}px, ${sunY + dy * offsets[i]}px) scale(${scales[i]})`;
+                }
+              }
+            } else {
+              flareRef.current.style.opacity = '0';
+            }
+          }
+        }
+
+        // speed lines visual flow
+        const shouldShowSpeedLines = velocityMagnitude > 40;
+        linesPool.forEach(lineMesh => {
+          const lMatInst = lineMesh.material as THREE.LineBasicMaterial;
+          if (shouldShowSpeedLines) {
+            lMatInst.opacity = THREE.MathUtils.lerp(lMatInst.opacity, 0.44, 4 * elapsedSec);
+            if (lineMesh.position.z > 0 || lMatInst.opacity === 0) {
+              lineMesh.position.set((Math.random() - 0.5) * 16, (Math.random() - 0.5) * 10, -12 - Math.random() * 20);
+            }
+            lineMesh.position.z += elapsedSec * 60;
+          } else {
+            lMatInst.opacity = THREE.MathUtils.lerp(lMatInst.opacity, 0, 10 * elapsedSec);
+          }
+        });
+
+        // dynamic speed blurs vignette
+        if (speedVignetteRef.current) {
+          const speedFactor = THREE.MathUtils.clamp((velocityMagnitude - 32) / 36, 0, 1);
+          speedVignetteRef.current.style.opacity = String(speedFactor * (player.isNitroActive ? 0.92 : 0.65));
+        }
+
+        // Align shadow casting light source targeting
+        sunLight.position.set(player.position.x + 80, player.position.y + 220, player.position.z + 80);
+        sunLight.target = carGroupMap.get('player') || sunLight.target;
+      }
+
+      renderer.render(scene, camera);
+    };
+
+    tick();
+
+    // observer handle resize
+    const handleResize = () => {
+      if (!containerRef.current || !renderer || !camera) return;
+      const w = containerRef.current.clientWidth;
+      const h = containerRef.current.clientHeight;
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, h);
+    };
+    const resizeObs = new ResizeObserver(() => handleResize());
+    resizeObs.observe(containerRef.current);
+
+    return () => {
+      cancelAnimationFrame(animationId);
+      resizeObs.disconnect();
+      renderer.dispose();
+      reflectionTex.dispose();
+      partGeo.dispose();
+      partMat.dispose();
+      lGeo.dispose();
+      lMat.dispose();
+      sunLight.dispose();
+      ambLight.dispose();
+    };
+  }, [physicsService, trackHelper]);
+
+  return (
+    <div ref={containerRef} id="canvas-container" className="relative w-full h-full overflow-hidden bg-sky-100">
+      <canvas ref={canvasRef} className="block w-full h-full" />
+      
+      {/* Cinematic Sunset Lens flares */}
+      <div ref={flareRef} className="pointer-events-none absolute inset-0 z-10 transition-opacity duration-300 opacity-0">
+        <div className="absolute w-28 h-28 rounded-full bg-amber-400/30 blur-xl filter" />
+        <div className="absolute w-14 h-14 rounded-full border border-orange-500/25 bg-orange-500/10 blur-sm filter" />
+        <div className="absolute w-8 h-8 rounded-full bg-rose-600/20 blur-xs filter" />
+        <div className="absolute w-18 h-18 rounded-full border border-indigo-400/20 bg-indigo-500/5 blur-md filter" />
+        <div className="absolute w-24 h-24 rounded-full bg-cyan-400/15 blur-lg filter" />
+        <div className="absolute w-40 h-40 rounded-full border border-yellow-300/10 bg-yellow-400/4 blur-xl filter" />
+      </div>
+
+      <div 
+        ref={speedVignetteRef} 
+        className="pointer-events-none absolute inset-0 z-20 mix-blend-multiply opacity-0 transition-opacity duration-150"
+        style={{
+          background: 'radial-gradient(circle, transparent 52%, rgba(240, 10, 10, 0.12) 80%, rgba(0, 0, 0, 0.72) 100%)'
+        }}
+      />
+    </div>
+  );
+};
