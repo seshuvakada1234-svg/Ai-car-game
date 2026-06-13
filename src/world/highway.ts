@@ -24,66 +24,39 @@ export function buildHighway(scene: THREE.Scene, trackHelper: TrackGeometryHelpe
     pole.castShadow = true;
     bSet.add(pole);
 
-    // Create a high visual quality neon canvas texture board with retro racing styling
+    // Create a high visual quality billboard canvas texture with realistic European branding
     const canvas = document.createElement('canvas');
     canvas.width = 512;
     canvas.height = 256;
     const ctx = canvas.getContext('2d');
     if (ctx) {
-      // Midnight dark backdrop
-      ctx.fillStyle = '#070a13';
+      // Classic deep Alpine forest spruce-green or sleek navy background
+      const isAlt = bb.text.includes('SPEED');
+      ctx.fillStyle = isAlt ? '#0f2027' : '#1e3a1e';
       ctx.fillRect(0, 0, 512, 256);
       
-      // Cyber neon gird lines background
-      ctx.strokeStyle = 'rgba(0, 240, 255, 0.15)';
-      ctx.lineWidth = 1;
-      for (let x = 0; x < 512; x += 32) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, 256);
-        ctx.stroke();
-      }
-      for (let y = 0; y < 256; y += 32) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(512, y);
-        ctx.stroke();
-      }
+      // Fine classic architectural border lines
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 6;
+      ctx.strokeRect(12, 12, 488, 232);
+      ctx.strokeStyle = isAlt ? '#ecc94b' : '#a7f3d0';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(20, 20, 472, 216);
 
-      // Outer bold double neon-pink/cyan frames
-      ctx.strokeStyle = '#ff007f';
-      ctx.lineWidth = 10;
-      ctx.strokeRect(10, 10, 492, 236);
-      ctx.strokeStyle = '#00f6ff';
-      ctx.lineWidth = 4;
-      ctx.strokeRect(18, 18, 476, 220);
-      
-      // Racing double speed stripes at the bottom
-      ctx.fillStyle = '#ffcc00';
-      ctx.fillRect(32, 204, 448, 14);
-      ctx.fillStyle = '#111111';
-      for (let s = 1; s < 18; s++) {
-        ctx.beginPath();
-        ctx.moveTo(s * 25 + 30, 204);
-        ctx.lineTo(s * 25 + 40, 204);
-        ctx.lineTo(s * 25 + 32, 218);
-        ctx.lineTo(s * 25 + 22, 218);
-        ctx.fill();
-      }
+      // Simple yellow warning / service bar at the bottom
+      ctx.fillStyle = isAlt ? '#ecc94b' : '#34d399';
+      ctx.fillRect(32, 200, 448, 12);
 
       // Center glowing title
       ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 36px "Space Grotesk", sans-serif';
-      ctx.shadowColor = '#00f6ff';
-      ctx.shadowBlur = 15;
+      ctx.font = 'bold 32px "Space Grotesk", sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('⚡ DRAGON RUSH ⚡', 256, 92);
+      ctx.fillText(isAlt ? '⛰️ AUTOBAHN SERVICE ⛰️' : '⛰️ SWISS ALPINE RALLY ⛰️', 256, 88);
       
       // Subtitle with bb message
-      ctx.fillStyle = '#00d2ff';
-      ctx.font = 'bold 28px "JetBrains Mono", monospace';
-      ctx.shadowColor = 'transparent';
-      ctx.fillText(bb.text, 256, 144);
+      ctx.fillStyle = isAlt ? '#fef08a' : '#cbd5e1';
+      ctx.font = 'bold 26px "JetBrains Mono", monospace';
+      ctx.fillText(bb.text, 256, 142);
     }
     
     // Massive AAA scale billboard: BoxGeometry(22, 11, 0.6) - UPDATED!

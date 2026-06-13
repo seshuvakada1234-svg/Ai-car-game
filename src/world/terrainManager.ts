@@ -130,33 +130,41 @@ export class TerrainManager {
   /**
    * Executes accelerated raycast query
    */
-  public queryRoadHeight(pos: THREE.Vector3, outNormal?: THREE.Vector3): number | null {
-    const rayOrigin = MemoryPool.getVector().set(pos.x, pos.y + 20.0, pos.z);
-    const rayDir = MemoryPool.getVector().set(0, -1, 0);
-    const raycaster = MemoryPool.tempRay;
-    raycaster.set(rayOrigin, rayDir);
-    raycaster.near = 0.0;
-    raycaster.far = 150.0;
-    
-    // Configure raycast for BVH-first traversal
-    raycaster.firstHitOnly = true;
+  public queryRoadHeight(pos: any, outNormal?: THREE.Vector3): number | null {
+    if (!pos || typeof pos.x !== 'number' || typeof pos.y !== 'number' || typeof pos.z !== 'number' || isNaN(pos.x) || isNaN(pos.y) || isNaN(pos.z)) {
+      return null;
+    }
 
-    if (this.roadBVHMesh) {
-      const intersections = raycaster.intersectObject(this.roadBVHMesh);
-      if (intersections.length > 0) {
-        if (outNormal && intersections[0].face) {
-          outNormal.copy(intersections[0].face.normal);
+    try {
+      const rayOrigin = MemoryPool.getVector().set(pos.x, pos.y + 20.0, pos.z);
+      const rayDir = MemoryPool.getVector().set(0, -1, 0);
+      const raycaster = MemoryPool.tempRay;
+      raycaster.set(rayOrigin, rayDir);
+      raycaster.near = 0.0;
+      raycaster.far = 150.0;
+      
+      // Configure raycast for BVH-first traversal
+      raycaster.firstHitOnly = true;
+
+      if (this.roadBVHMesh) {
+        const intersections = raycaster.intersectObject(this.roadBVHMesh);
+        if (intersections && intersections.length > 0) {
+          if (outNormal && intersections[0].face) {
+            outNormal.copy(intersections[0].face.normal);
+          }
+          return intersections[0].point.y;
         }
-        return intersections[0].point.y;
-      }
-    } else if (this.roadMeshesCache.length > 0) {
-      const intersections = raycaster.intersectObjects(this.roadMeshesCache, true);
-      if (intersections.length > 0) {
-        if (outNormal && intersections[0].face) {
-          outNormal.copy(intersections[0].face.normal);
+      } else if (this.roadMeshesCache && this.roadMeshesCache.length > 0) {
+        const intersections = raycaster.intersectObjects(this.roadMeshesCache, true);
+        if (intersections && intersections.length > 0) {
+          if (outNormal && intersections[0].face) {
+            outNormal.copy(intersections[0].face.normal);
+          }
+          return intersections[0].point.y;
         }
-        return intersections[0].point.y;
       }
+    } catch (e) {
+      console.warn("Exception in queryRoadHeight raycast helper:", e);
     }
     return null;
   }

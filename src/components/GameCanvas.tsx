@@ -7,6 +7,7 @@ import { gltfModelCache, preloadGLTFAssets, createCarChassisGroup, getCarModelFo
 import { DragonTrackWorld } from '../world/DragonTrackWorld';
 import { particleSystem } from '../world/particleSystem';
 import { lodManager } from '../world/lodManager';
+import { terrainManager } from '../world/terrainManager';
 
 // ------------------------------------------------------------
 // HIGH-FI DYNAMIC SYNTHESIZED HYPERCAR ENGINE SOUND SYSTEM
@@ -622,28 +623,16 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             }
           }
 
-          // Ground Raycast
-          const raycastOrigin = new THREE.Vector3(c.position.x, c.position.y + 1.0, c.position.z);
-          const raycaster = new THREE.Raycaster(
-            raycastOrigin,
-            new THREE.Vector3(0, -1, 0),
-            0,
-            100
-          );
-          
-          const roadMeshes: THREE.Object3D[] = [];
-          scene.traverse(node => {
-            if (node instanceof THREE.Mesh) {
-              const nodeName = node.name.toLowerCase();
-              if (nodeName.includes('road') || nodeName.includes('bridge') || nodeName.includes('highway') || nodeName.includes('tunnel') || nodeName.includes('terrain') || nodeName.includes('ground')) {
-                roadMeshes.push(node);
-              }
+          // Ground Height Snapping using pre-baked terrain or accelerated Road BVH
+          try {
+            const roadHeight = terrainManager.queryRoadHeight(c.position);
+            if (roadHeight !== null) {
+              c.position.y = roadHeight + 0.05;
+            } else {
+              c.position.y = terrainManager.getHeight(c.position.x, c.position.z) + 0.05;
             }
-          });
-          
-          const intersections = raycaster.intersectObjects(roadMeshes, true);
-          if (intersections.length > 0) {
-            c.position.y = intersections[0].point.y + 0.05;
+            carGroup.position.y = c.position.y;
+          } catch (e) {
             carGroup.position.y = c.position.y;
           }
           carGroup.rotation.y = c.angle;

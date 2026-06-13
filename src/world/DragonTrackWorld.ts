@@ -11,12 +11,14 @@ import { buildHairpins } from './hairpins';
 import { buildTemple } from './temple';
 import { buildHighway } from './highway';
 import { buildFinishArea, FinishAreaController } from './finishArea';
+import { buildAnimals, AnimalController } from './animals';
 import { terrainManager } from './terrainManager';
 import { lodManager } from './lodManager';
 
 export class DragonTrackWorld {
   private waterfallCtrl: WaterfallController | null = null;
   private finishAreaCtrl: FinishAreaController | null = null;
+  private animalsCtrl: AnimalController | null = null;
 
   constructor(scene: THREE.Scene, trackHelper: TrackGeometryHelper) {
     // 1. Pre-bake Terrain Heightmap once before anything else
@@ -56,6 +58,7 @@ export class DragonTrackWorld {
     buildTemple(scene, trackHelper);
     buildHighway(scene, trackHelper);
     this.finishAreaCtrl = buildFinishArea(scene, trackHelper);
+    this.animalsCtrl = buildAnimals(scene, trackHelper);
   }
 
   public update(elapsedSec: number, trackHelper: TrackGeometryHelper, playerRank = 1, isFinished = false): void {
@@ -66,6 +69,10 @@ export class DragonTrackWorld {
     // Animate fireworks and other celebrating spectators
     if (this.finishAreaCtrl) {
       this.finishAreaCtrl.update(elapsedSec, playerRank, isFinished);
+    }
+    // Animate the European countryside animal herds and flying birds
+    if (this.animalsCtrl) {
+      this.animalsCtrl.update(elapsedSec);
     }
   }
 
@@ -275,7 +282,7 @@ export class DragonTrackWorld {
           dummy.position.copy(pts[i]).add(nextPt).multiplyScalar(0.5);
           dummy.position.y += 0.15;
           dummy.lookAt(nextPt);
-          const segDist = pts[i].distanceTo(nextPt);
+          const segDist = (pts[i] && typeof pts[i].distanceTo === 'function' && nextPt) ? pts[i].distanceTo(nextPt) : 6.0;
           dummy.scale.set(1, 1, segDist / 6);
           dummy.updateMatrix();
           bRailInst.setMatrixAt(railIdx++, dummy.matrix);

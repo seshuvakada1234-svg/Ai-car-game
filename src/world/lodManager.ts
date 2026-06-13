@@ -51,8 +51,10 @@ export class LODManager {
    * Evaluates player distance and updates visibility recursively
    */
   public update(playerPos: THREE.Vector3): void {
+    if (!playerPos || typeof playerPos.distanceTo !== 'function') return;
+
     for (const sector of this.sectors) {
-      if (!sector.group) continue;
+      if (!sector.group || !sector.center || typeof sector.center.distanceTo !== 'function') continue;
 
       const dist = playerPos.distanceTo(sector.center);
 

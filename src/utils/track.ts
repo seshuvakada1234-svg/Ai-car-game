@@ -207,23 +207,25 @@ export function getTerrainHeight(x: number, z: number, trackHelper?: any): numbe
   }
 
   // 4. Dynamic Road Corridors Carving
-  if (trackHelper) {
+  if (trackHelper && typeof trackHelper.getNearestTrackInfo === 'function') {
     const info = trackHelper.getNearestTrackInfo(new THREE.Vector3(x, 0, z));
-    const rType = trackHelper.getRoadTypeAt(info.progress);
-    const width = trackHelper.getRoadWidthAt(info.progress);
-    const halfWidth = width / 2;
-    const flatZone = halfWidth + 1.25; // zero-clipping road shoulder
-    const blendZone = 36.0;            // smooth shoulder ramp
+    if (info) {
+      const rType = typeof trackHelper.getRoadTypeAt === 'function' ? trackHelper.getRoadTypeAt(info.progress) : 'normal';
+      const width = typeof trackHelper.getRoadWidthAt === 'function' ? trackHelper.getRoadWidthAt(info.progress) : 24;
+      const halfWidth = width / 2;
+      const flatZone = halfWidth + 1.25; // zero-clipping road shoulder
+      const blendZone = 36.0;            // smooth shoulder ramp
 
-    if (rType !== 'bridge') {
-      // Standard ground shoulder beds carved level with spline
-      if (info.distanceToTrack < flatZone) {
-        baseHeight = info.nearestPoint.y - 0.18;
-      } else if (info.distanceToTrack < flatZone + blendZone) {
-        const t = (info.distanceToTrack - flatZone) / blendZone;
-        const s = t * t * (3 - 2 * t);
-        const roadBedY = info.nearestPoint.y - 0.18;
-        baseHeight = THREE.MathUtils.lerp(roadBedY, baseHeight, s);
+      if (rType !== 'bridge' && info.nearestPoint) {
+        // Standard ground shoulder beds carved level with spline
+        if (info.distanceToTrack < flatZone) {
+          baseHeight = info.nearestPoint.y - 0.18;
+        } else if (info.distanceToTrack < flatZone + blendZone) {
+          const t = (info.distanceToTrack - flatZone) / blendZone;
+          const s = t * t * (3 - 2 * t);
+          const roadBedY = info.nearestPoint.y - 0.18;
+          baseHeight = THREE.MathUtils.lerp(roadBedY, baseHeight, s);
+        }
       }
     }
   }
@@ -373,7 +375,7 @@ export class TrackGeometryHelper {
         for (let offset = -20; offset <= 20; offset++) {
           const i = (lastCachedIdx + offset + samples) % samples;
           const pt = this.cachedPoints[i];
-          if (!pt || typeof pt.distanceToSquared !== 'function') continue;
+          if (!pt || typeof pt.distanceToSquared !== 'function' || !pos || typeof pos.distanceToSquared !== 'function') continue;
           const distSq = pos.distanceToSquared(pt);
           if (!isNaN(distSq) && distSq < minDistance) {
             minDistance = distSq;
@@ -386,7 +388,7 @@ export class TrackGeometryHelper {
         // Full scan fallback
         for (let i = 0; i < samples; i++) {
           const pt = this.cachedPoints[i];
-          if (!pt || typeof pt.distanceToSquared !== 'function') continue;
+          if (!pt || typeof pt.distanceToSquared !== 'function' || !pos || typeof pos.distanceToSquared !== 'function') continue;
           const distSq = pos.distanceToSquared(pt);
           if (!isNaN(distSq) && distSq < minDistance) {
             minDistance = distSq;
@@ -400,7 +402,7 @@ export class TrackGeometryHelper {
         const startPt = this.curve ? this.curve.getPointAt(0) : new THREE.Vector3();
         if (startPt) {
           nearestPoint.copy(startPt);
-          if (typeof pos.distanceToSquared === 'function') {
+          if (pos && typeof pos.distanceToSquared === 'function' && nearestPoint && typeof nearestPoint.distanceToSquared === 'function') {
             const distSq = pos.distanceToSquared(nearestPoint);
             if (!isNaN(distSq)) {
               minDistance = distSq;
@@ -425,7 +427,7 @@ export class TrackGeometryHelper {
           if (isNaN(u) || u === undefined || u === null) u = 0.0;
           try {
             this.curve.getPointAt(u, tempPt);
-            if (tempPt && typeof tempPt.distanceToSquared !== 'undefined' && typeof pos.distanceToSquared !== 'undefined') {
+            if (tempPt && typeof tempPt.distanceToSquared === 'function' && pos && typeof pos.distanceToSquared === 'function') {
               const distSq = pos.distanceToSquared(tempPt);
               if (!isNaN(distSq) && distSq < minDistance) {
                 minDistance = distSq;

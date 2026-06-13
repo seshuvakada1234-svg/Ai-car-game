@@ -607,7 +607,7 @@ export class GamePhysicsService {
 
     if (nextChpt && nextChpt.position) {
       const chptPos = GamePhysicsService._vecB.set(nextChpt.position.x, nextChpt.position.y, nextChpt.position.z);
-      if (pos3 && typeof pos3.distanceTo === 'function') {
+      if (pos3 && typeof pos3.distanceTo === 'function' && chptPos && typeof chptPos.distanceToSquared === 'function') {
         car.distanceToNextCheckpoint = pos3.distanceTo(chptPos);
       } else {
         car.distanceToNextCheckpoint = 999;

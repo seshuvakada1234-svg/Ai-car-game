@@ -203,7 +203,7 @@ export function buildForest(scene: THREE.Scene, trackHelper: TrackGeometryHelper
 
       fenceDummy.position.copy(anchorL_curr).add(anchorL_prev).multiplyScalar(0.5);
       fenceDummy.lookAt(anchorL_curr);
-      const distL = anchorL_curr.distanceTo(anchorL_prev);
+      const distL = (anchorL_curr && typeof anchorL_curr.distanceTo === 'function') ? anchorL_curr.distanceTo(anchorL_prev) : 4.25;
       fenceDummy.scale.set(1, 1, distL / 4.25);
       fenceDummy.updateMatrix();
       if (logCount < 560) {
@@ -222,7 +222,7 @@ export function buildForest(scene: THREE.Scene, trackHelper: TrackGeometryHelper
 
       fenceDummy.position.copy(anchorR_curr).add(anchorR_prev).multiplyScalar(0.5);
       fenceDummy.lookAt(anchorR_curr);
-      const distR = anchorR_curr.distanceTo(anchorR_prev);
+      const distR = (anchorR_curr && typeof anchorR_curr.distanceTo === 'function') ? anchorR_curr.distanceTo(anchorR_prev) : 4.25;
       fenceDummy.scale.set(1, 1, distR / 4.25);
       fenceDummy.updateMatrix();
       if (logCount < 560) {
