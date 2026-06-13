@@ -18,6 +18,11 @@ import { terrainManager } from './terrainManager';
 // Visual output is bit-identical because terrainManager.initialize() is called
 // before buildTerrain() in DragonTrackWorld and bakes the same getTerrainHeight()
 // function into the Float32Array that getHeight() reads from.
+//
+// MOBILE OPTIMIZATION: Segment count reduced from 250 → 150 on mobile.
+// A 150×150 mesh = 22,801 vertices vs 63,001 at 250×250 — a 64% vertex count
+// reduction. Terrain shape is perceptually identical at driving distances.
+// Desktop keeps 400×400 for maximum fidelity.
 // ─────────────────────────────────────────────────────────────────────────────
 export function buildTerrain(scene: THREE.Scene, trackHelper: TrackGeometryHelper): THREE.Mesh {
 
@@ -88,10 +93,22 @@ export function buildTerrain(scene: THREE.Scene, trackHelper: TrackGeometryHelpe
 
   // ── 4. CONTINUOUS HEIGHTMAP TERRAIN ────────────────────────────────────────
   //
-  // Mobile gets a lighter 250×250 mesh; desktop gets full 400×400.
+  // MOBILE OPTIMIZATION: Reduced from 250 → 150 segments on mobile.
+  //   - Desktop  (segments=400): 401×401 = 160,801 vertices
+  //   - Old mobile (segments=250): 251×251 =  63,001 vertices
+  //   - New mobile (segments=150): 151×151 =  22,801 vertices  ← 64% fewer
+  //
+  // At driving distances the terrain resolution is imperceptible because:
+  //   a) The terrain covers 6000×7500 m — at 150 segments each cell is 40×50 m,
+  //      comparable to the rendering resolution in the far field.
+  //   b) FlatShading is used, so per-vertex normal quality doesn't matter.
+  //   c) The road mesh (400 slices) is a separate high-res geometry so the
+  //      driveable surface is unaffected by terrain LOD.
   const isMobile = typeof window !== 'undefined' &&
     (window.innerWidth < 768 || /Mobi|Android|iPhone/i.test(navigator.userAgent));
-  const segments = isMobile ? 250 : 400;
+
+  // Desktop: 400 (unchanged). Mobile: 150 (was 250 — 64% fewer vertices).
+  const segments = isMobile ? 150 : 400;
 
   const terrainGeo = new THREE.PlaneGeometry(6000, 7500, segments, segments);
   const posAttr    = terrainGeo.attributes.position;
