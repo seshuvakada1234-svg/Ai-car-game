@@ -5,6 +5,8 @@ import { GamePhysicsService } from '../utils/gamePhysics';
 import { TrackGeometryHelper } from '../utils/track';
 import { gltfModelCache, preloadGLTFAssets, createCarChassisGroup, getCarModelForId, modelWheelMetadataMap, loadCarModel } from '../world/procedural';
 import { DragonTrackWorld } from '../world/DragonTrackWorld';
+import { particleSystem } from '../world/particleSystem';
+import { lodManager } from '../world/lodManager';
 
 // ------------------------------------------------------------
 // HIGH-FI DYNAMIC SYNTHESIZED HYPERCAR ENGINE SOUND SYSTEM
@@ -259,6 +261,8 @@ interface GameCanvasProps {
   onFinishRace: () => void;
   onTick: (updatedCars: CarState[]) => void;
   soundEnabled?: boolean;
+  timeOfDay?: 'morning' | 'noon' | 'sunset' | 'night';
+  weather?: 'sunny' | 'cloudy' | 'foggy' | 'rain';
 }
 
 export const GameCanvas: React.FC<GameCanvasProps> = ({
@@ -271,6 +275,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   onFinishRace,
   onTick,
   soundEnabled = true,
+  timeOfDay = 'sunset',
+  weather = 'sunny',
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -287,6 +293,18 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   const soundSystemRef = useRef<EngineSoundSystem | null>(null);
   const soundEnabledRef = useRef<boolean>(soundEnabled);
 
+  const timeOfDayRef = useRef<'morning' | 'noon' | 'sunset' | 'night'>(timeOfDay);
+  const weatherRef = useRef<'sunny' | 'cloudy' | 'foggy' | 'rain'>(weather);
+
+  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const sceneRef = useRef<THREE.Scene | null>(null);
+  const skyDomeRef = useRef<THREE.Mesh | null>(null);
+  const sunDiskRef = useRef<THREE.Mesh | null>(null);
+  const sunGlowRef = useRef<THREE.Mesh | null>(null);
+  const sunLightRef = useRef<THREE.DirectionalLight | null>(null);
+  const ambLightRef = useRef<THREE.HemisphereLight | null>(null);
+  const rainMeshRef = useRef<THREE.LineSegments | null>(null);
+
   useEffect(() => { carsRef.current = cars; }, [cars]);
   useEffect(() => { controlsRef.current = playerControls; }, [playerControls]);
   useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
@@ -294,6 +312,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   useEffect(() => { onFinishRaceRef.current = onFinishRace; }, [onFinishRace]);
   useEffect(() => { onTickRef.current = onTick; }, [onTick]);
   useEffect(() => { soundEnabledRef.current = soundEnabled; }, [soundEnabled]);
+  useEffect(() => { timeOfDayRef.current = timeOfDay; }, [timeOfDay]);
+  useEffect(() => { weatherRef.current = weather; }, [weather]);
 
   useEffect(() => {
     if (!canvasRef.current || !containerRef.current) return;
@@ -306,13 +326,13 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     const camera = new THREE.PerspectiveCamera(62, 1, 0.4, 1800);
     const renderer = new THREE.WebGLRenderer({
       canvas: canvasRef.current,
-      antialias: true,
+      antialias: false,
       powerPreference: 'high-performance',
     });
     renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFShadowMap;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.0;
@@ -419,6 +439,40 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     const ambLight = new THREE.HemisphereLight('#0d2149', '#4d2d14', 1.0);
     scene.add(ambLight);
 
+    // Save elements dynamically to refs
+    rendererRef.current = renderer;
+    sceneRef.current = scene;
+    skyDomeRef.current = skyDome;
+    sunDiskRef.current = sunDisk;
+    sunGlowRef.current = sunGlow;
+    sunLightRef.current = sunLight;
+    ambLightRef.current = ambLight;
+
+    // Fast-rendering Rain Particle System using single LineSegments mesh (600 drops)
+    const rainCount = 600;
+    const rainGeo = new THREE.BufferGeometry();
+    const rainPositions = new Float32Array(rainCount * 6);
+    for (let r = 0; r < rainCount; r++) {
+      const rx = Math.random() * 200 - 100;
+      const ry = Math.random() * 80;
+      const rz = Math.random() * 200 - 100;
+
+      const idx = r * 6;
+      rainPositions[idx] = rx;
+      rainPositions[idx + 1] = ry;
+      rainPositions[idx + 2] = rz;
+
+      rainPositions[idx + 3] = rx - 0.5;
+      rainPositions[idx + 4] = ry - 3.5;
+      rainPositions[idx + 5] = rz;
+    }
+    rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPositions, 3));
+    const rainMat = new THREE.LineBasicMaterial({ color: '#cffafe', transparent: true, opacity: 0.38 });
+    const rainMesh = new THREE.LineSegments(rainGeo, rainMat);
+    rainMesh.visible = false;
+    scene.add(rainMesh);
+    rainMeshRef.current = rainMesh;
+
     // Allocate Ribbon Trails for all cars (except daily commuter traffic)
     const carLeftTailTrails = new Map<string, RibbonTrail>();
     const carRightTailTrails = new Map<string, RibbonTrail>();
@@ -444,27 +498,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       scene.add(pl);
     });
 
-    // --- 6. PARTICLES ---
-    const maxParticles = 600;
-    const partGeo = new THREE.BufferGeometry();
-    const partPositions = new Float32Array(maxParticles * 3);
-    const partColors = new Float32Array(maxParticles * 3);
-    partGeo.setAttribute('position', new THREE.BufferAttribute(partPositions, 3));
-    partGeo.setAttribute('color', new THREE.BufferAttribute(partColors, 3));
-
-    const pTexture = new THREE.TextureLoader().load(
-      'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><circle cx="16" cy="16" r="14" fill="white"/></svg>'
-    );
-    const partMat = new THREE.PointsMaterial({
-      size: 1.0,
-      vertexColors: true,
-      transparent: true,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      map: pTexture,
-    });
-    const particlePoints = new THREE.Points(partGeo, partMat);
-    scene.add(particlePoints);
+    // --- 6. PARTICLES SYSTEM ---
+    particleSystem.initialize(scene);
 
     // Speed Lines Effect
     const speedLinesCount = 35;
@@ -549,6 +584,43 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
         if (carGroup && carGroup.position && carGroup.rotation) {
           carGroup.position.set(c.position.x, c.position.y, c.position.z);
+
+          // Dynamic Headlight Assembly For Night/Storm Conditions
+          let headlightObj = carGroup.getObjectByName('car_headlight');
+          const needsLights = timeOfDayRef.current === 'night' || weatherRef.current === 'rain' || weatherRef.current === 'foggy';
+          
+          if (needsLights) {
+            if (!headlightObj) {
+              const hGroup = new THREE.Group();
+              hGroup.name = 'car_headlight';
+              
+              // Forward casting spotlight beam
+              const spot = new THREE.SpotLight('#fffaed', 4.5, 45, Math.PI / 5, 0.4, 0.5);
+              spot.position.set(0, 0.35, 1.2);
+              spot.target.position.set(0, 0.1, 10.0);
+              spot.distance = 55;
+              spot.castShadow = (c.id === 'player'); // Shadow mapping only on player to keep performance high
+              
+              hGroup.add(spot);
+              hGroup.add(spot.target);
+              
+              // Small yellow glowing bulb spheres
+              const bulbMat = new THREE.MeshBasicMaterial({ color: '#fffaed' });
+              const bulbGeo = new THREE.SphereGeometry(0.18, 5, 5);
+              
+              const leftBulb = new THREE.Mesh(bulbGeo, bulbMat);
+              leftBulb.position.set(-0.6, 0.35, 1.3);
+              const rightBulb = new THREE.Mesh(bulbGeo, bulbMat);
+              rightBulb.position.set(0.6, 0.35, 1.3);
+              hGroup.add(leftBulb, rightBulb);
+              
+              carGroup.add(hGroup);
+            }
+          } else {
+            if (headlightObj) {
+              carGroup.remove(headlightObj);
+            }
+          }
 
           // Ground Raycast
           const raycastOrigin = new THREE.Vector3(c.position.x, c.position.y + 1.0, c.position.z);
@@ -712,8 +784,13 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
                 clonedModel.traverse(node => {
                   if (node instanceof THREE.Mesh) {
-                    node.castShadow = true;
-                    node.receiveShadow = true;
+                    if (c.id === 'player') {
+                      node.castShadow = true;
+                      node.receiveShadow = true;
+                    } else {
+                      node.castShadow = false;
+                      node.receiveShadow = true;
+                    }
 
                     // Set metalness 0.8, roughness 0.5, emissive 0 on original GLTF materials to keep original colors
                     const materials = Array.isArray(node.material) ? node.material : [node.material];
@@ -727,70 +804,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                         mat.metalness = 0.8;
                       }
                     });
-                    return;
-                    
-                    const nodeName = node.name.toLowerCase();
-                    // 5. Use the wheels included in the GLB model—do NOT hide them!
-                    const isWheel = nodeName.includes('wheel') || nodeName.includes('tire') || nodeName.includes('rim') || nodeName.includes('pneu');
-                    if (isWheel) {
-                      if (!(carGroup as any).glbWheels) {
-                        (carGroup as any).glbWheels = [];
-                      }
-                      (carGroup as any).glbWheels.push(node);
-                      
-                      // Material for tires & rims
-                      if (nodeName.includes('rim') || nodeName.includes('wheel')) {
-                        node.material = new THREE.MeshStandardMaterial({
-                          color: '#dedede',
-                          roughness: 0.15,
-                          metalness: 0.95,
-                          envMap: reflectionTex,
-                          envMapIntensity: 2.8
-                        });
-                      } else {
-                        node.material = new THREE.MeshStandardMaterial({
-                          color: '#121213',
-                          roughness: 0.9,
-                          metalness: 0.02
-                        });
-                      }
-                      return;
-                    }
-
-                    // Look for model brake light parts
-                    const isBrakeLight = nodeName.includes('taillight') || nodeName.includes('brake') || nodeName.includes('light_back') || nodeName.includes('glass_red') || nodeName.includes('led_back');
-                    if (isBrakeLight) {
-                      const brakeMat = new THREE.MeshStandardMaterial({
-                        color: '#ff111a',
-                        roughness: 0.1,
-                        metalness: 0.9,
-                        emissive: new THREE.Color('#320001')
-                      });
-                      node.material = brakeMat;
-                      const arr = modelBrakeLightMap.get(c.id) || [];
-                      arr.push(brakeMat);
-                      modelBrakeLightMap.set(c.id, arr);
-                    } else if (nodeName.includes('glass') || nodeName.includes('window')) {
-                      node.material = new THREE.MeshStandardMaterial({
-                        color: '#08090f',
-                        metalness: 0.98,
-                        roughness: 0.02,
-                        transparent: true,
-                        opacity: 0.75,
-                        envMap: reflectionTex,
-                        envMapIntensity: 2.8
-                      });
-                    } else {
-                      // Apply stellar metallic car paint
-                      const origColor = (node.material && 'color' in node.material) ? (node.material as any).color : c.color;
-                      node.material = new THREE.MeshStandardMaterial({
-                        color: origColor,
-                        roughness: 0.08,
-                        metalness: 0.92,
-                        envMap: reflectionTex,
-                        envMapIntensity: 2.5
-                      });
-                    }
                   }
                 });
                 carGroup.add(clonedModel);
@@ -908,27 +921,13 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         }
       });
 
-      // Sparks / exhaust particles attributes mapping
-      let pI = 0;
-      const posAttr = particlePoints.geometry.getAttribute('position') as THREE.BufferAttribute;
-      const colAttr = particlePoints.geometry.getAttribute('color') as THREE.BufferAttribute;
-      physicsService.particles.forEach(part => {
-        if (part.active && pI < maxParticles) {
-          posAttr.setXYZ(pI, part.position.x, part.position.y, part.position.z);
-          const colorObj = new THREE.Color(part.color);
-          colAttr.setXYZ(pI, colorObj.r * part.life, colorObj.g * part.life, colorObj.b * part.life);
-          pI++;
-        }
-      });
-      for (let j = pI; j < maxParticles; j++) {
-        posAttr.setXYZ(j, 9999, 9999, 9999);
-      }
-      posAttr.needsUpdate = true;
-      colAttr.needsUpdate = true;
-
       // Chase camera tracking
       const player = currentCars.find(c => c.id === 'player');
       if (player) {
+         // Run Level of Detail visual culling updates around player's position
+         const pPos = new THREE.Vector3(player.position.x, player.position.y, player.position.z);
+         lodManager.update(pPos);
+
         // --- ASPHALT 8 DYNAMIC CHASE CAMERA SYSTEM ---
         const speedKmh = Math.abs(player.speed) * 3.6;
         const velocityMagnitude = Math.sqrt(player.velocity.x ** 2 + player.velocity.z ** 2);
@@ -1086,6 +1085,50 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         // Align shadow casting light source targeting
         sunLight.position.set(player.position.x + 80, player.position.y + 220, player.position.z + 80);
         sunLight.target = carGroupMap.get('player') || sunLight.target;
+
+        // --- ANIMATE SPINNING WATERMILL WHEELS ---
+        scene.traverse((obj) => {
+          if (obj.name === 'watermill_wheel' && obj.userData && obj.userData.isRotating) {
+            obj.rotation.z += elapsedSec * obj.userData.rotationSpeed;
+          }
+        });
+
+        // --- ANIMATE RAIN DROPS COLUMN TRACKING THE PLAYER ---
+        const activeWeather = weatherRef.current;
+        if (rainMeshRef.current && activeWeather === 'rain') {
+          rainMeshRef.current.visible = true;
+          rainMeshRef.current.position.set(player.position.x, 0, player.position.z);
+
+          const rGeo = rainMeshRef.current.geometry;
+          const posAttr = rGeo.getAttribute('position') as THREE.BufferAttribute;
+          const array = posAttr.array as Float32Array;
+          const count = 600;
+
+          for (let r = 0; r < count; r++) {
+            const idx = r * 6;
+            // Translate rain drop down
+            array[idx + 1] -= elapsedSec * 62.0;
+            array[idx + 4] -= elapsedSec * 62.0;
+
+            // Reset rain drop to upper height once it hits player deck level
+            if (array[idx + 1] < player.position.y - 12.0) {
+              const rx = Math.random() * 120.0 - 60.0;
+              const ry = player.position.y + 50.0 + Math.random() * 20.0;
+              const rz = Math.random() * 120.0 - 60.0;
+
+              array[idx] = rx;
+              array[idx + 1] = ry;
+              array[idx + 2] = rz;
+
+              array[idx + 3] = rx - 0.4;
+              array[idx + 4] = ry - 3.2;
+              array[idx + 5] = rz;
+            }
+          }
+          posAttr.needsUpdate = true;
+        } else if (rainMeshRef.current) {
+          rainMeshRef.current.visible = false;
+        }
       }
 
       renderer.render(scene, camera);
@@ -1110,8 +1153,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       resizeObs.disconnect();
       renderer.dispose();
       reflectionTex.dispose();
-      partGeo.dispose();
-      partMat.dispose();
+      particleSystem.dispose();
       lGeo.dispose();
       lMat.dispose();
       sunLight.dispose();
@@ -1130,6 +1172,154 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       carRightExhaustTrails.forEach(t => t.dispose());
     };
   }, [physicsService, trackHelper]);
+
+  // --- REACTIVE HIGH-FIDELITY WEATHER & TIME OF DAY CONTROLLER ---
+  useEffect(() => {
+    const scene = sceneRef.current;
+    const skyDome = skyDomeRef.current;
+    const sunDisk = sunDiskRef.current;
+    const sunGlow = sunGlowRef.current;
+    const sunLight = sunLightRef.current;
+    const ambLight = ambLightRef.current;
+
+    if (!scene || !skyDome) return;
+
+    // 1. Setup baseline environment metrics by Time of Day
+    const sunPos = new THREE.Vector3();
+    let sunColor = '#ffffff';
+    let sunIntensity = 3.5;
+    let skyColor1 = '#000000', skyColor2 = '#000000';
+    let ambSky = '#0d2149', ambGround = '#4d2d14', ambIntensity = 1.0;
+    let baseFogColor = '#f55d31';
+    let baseFogDensity = 0.0016;
+
+    switch (timeOfDay) {
+      case 'morning':
+        sunPos.set(120, 160, -220);
+        sunColor = '#ffd9b3';
+        sunIntensity = 2.4;
+        skyColor1 = '#ffcaa8'; // warm dawn horizon
+        skyColor2 = '#4fa1eb'; // bright sky blue
+        ambSky = '#a9bce0';
+        ambGround = '#4d3d34';
+        ambIntensity = 1.1;
+        baseFogColor = '#cbd2db';
+        baseFogDensity = 0.0022;
+        break;
+      case 'noon':
+        sunPos.set(0, 480, 0);
+        sunColor = '#ffffff';
+        sunIntensity = 3.8;
+        skyColor1 = '#ebf6ff';
+        skyColor2 = '#1b5cc2';
+        ambSky = '#dceafd';
+        ambGround = '#5c5643';
+        ambIntensity = 1.5;
+        baseFogColor = '#cbdbe7';
+        baseFogDensity = 0.0008;
+        break;
+      case 'sunset':
+        sunPos.set(120, 50, 450);
+        sunColor = '#ffa64d';
+        sunIntensity = 3.2;
+        skyColor1 = '#ff4d00';
+        skyColor2 = '#08081a';
+        ambSky = '#54208a';
+        ambGround = '#3b1a03';
+        ambIntensity = 1.1;
+        baseFogColor = '#e0420f';
+        baseFogDensity = 0.0015;
+        break;
+      case 'night':
+        sunPos.set(0, -300, 0);
+        sunColor = '#0a1122';
+        sunIntensity = 0.15;
+        skyColor1 = '#090e24';
+        skyColor2 = '#010206';
+        ambSky = '#030614';
+        ambGround = '#010204';
+        ambIntensity = 0.25;
+        baseFogColor = '#010205';
+        baseFogDensity = 0.0045;
+        break;
+    }
+
+    // 2. Overlay Weather filters onto base settings
+    let finalFogColor = baseFogColor;
+    let finalFogDensity = baseFogDensity;
+    let finalSunIntensity = sunIntensity;
+    let finalAmbIntensity = ambIntensity;
+
+    if (weather === 'cloudy') {
+      finalFogDensity *= 1.8;
+      finalSunIntensity *= 0.35;
+      finalAmbIntensity *= 0.72;
+      skyColor1 = '#7c8b99';
+      skyColor2 = '#3a444c';
+      finalFogColor = '#5e6b75';
+    } else if (weather === 'foggy') {
+      finalFogDensity *= 4.5;
+      finalSunIntensity *= 0.08;
+      finalAmbIntensity *= 0.45;
+      skyColor1 = '#475569';
+      skyColor2 = '#1e293b';
+      finalFogColor = '#334155';
+    } else if (weather === 'rain') {
+      finalFogDensity *= 2.2;
+      finalSunIntensity *= 0.22;
+      finalAmbIntensity *= 0.6;
+      skyColor1 = '#1e293b';
+      skyColor2 = '#0f172a';
+      finalFogColor = '#1e293b';
+    }
+
+    // 3. Command properties to active Three scene nodes
+    if (sunLight) {
+      sunLight.position.copy(sunPos);
+      sunLight.color.set(sunColor);
+      sunLight.intensity = finalSunIntensity;
+    }
+    if (ambLight) {
+      ambLight.color.set(ambSky);
+      ambLight.groundColor.set(ambGround);
+      ambLight.intensity = finalAmbIntensity;
+    }
+
+    if (sunDisk && sunGlow) {
+      sunDisk.position.copy(sunPos).normalize().multiplyScalar(1350);
+      sunDisk.lookAt(0, 0, 0);
+      sunGlow.position.copy(sunDisk.position);
+      sunGlow.lookAt(0, 0, 0);
+
+      // Hide sun dial when obscured by rain/fog/night
+      const isSunHidden = (timeOfDay === 'night' || weather === 'foggy' || weather === 'rain');
+      sunDisk.visible = !isSunHidden;
+      sunGlow.visible = !isSunHidden;
+    }
+
+    // Redraw Skydome vertex colors spectrum
+    const geometry = skyDome.geometry;
+    const currentSkyColors: number[] = [];
+    const skyPositions = geometry.attributes.position;
+    const cVal1 = new THREE.Color(skyColor1);
+    const cVal2 = new THREE.Color(skyColor2);
+
+    for (let i = 0; i < skyPositions.count; i++) {
+      const y = skyPositions.getY(i);
+      const ratio = (y + 1400) / 2800; // 0..1 factor
+      const clrComp = new THREE.Color();
+      clrComp.lerpColors(cVal1, cVal2, ratio);
+      currentSkyColors.push(clrComp.r, clrComp.g, clrComp.b);
+    }
+    geometry.setAttribute('color', new THREE.Float32BufferAttribute(currentSkyColors, 3));
+    geometry.attributes.color.needsUpdate = true;
+
+    // Apply scene-wide exponential fog
+    scene.fog = new THREE.FogExp2(finalFogColor, finalFogDensity);
+    if (rendererRef.current) {
+      rendererRef.current.setClearColor(finalFogColor);
+    }
+  }, [timeOfDay, weather]);
 
   return (
     <div ref={containerRef} id="canvas-container" className="relative w-full h-full overflow-hidden bg-sky-100">

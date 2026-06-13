@@ -11,13 +11,18 @@ import { buildHairpins } from './hairpins';
 import { buildTemple } from './temple';
 import { buildHighway } from './highway';
 import { buildFinishArea, FinishAreaController } from './finishArea';
+import { terrainManager } from './terrainManager';
+import { lodManager } from './lodManager';
 
 export class DragonTrackWorld {
   private waterfallCtrl: WaterfallController | null = null;
   private finishAreaCtrl: FinishAreaController | null = null;
 
   constructor(scene: THREE.Scene, trackHelper: TrackGeometryHelper) {
-    // 1. Procedural Backdrop, Fog, Sky, Clouds, Lake, Canyon River
+    // 1. Pre-bake Terrain Heightmap once before anything else
+    terrainManager.initialize(trackHelper);
+
+    // 2. Procedural Backdrop, Fog, Sky, Clouds, Lake, Canyon River
     buildTerrain(scene, trackHelper);
 
     // Decorative craggy slate rock piles
@@ -38,10 +43,10 @@ export class DragonTrackWorld {
     rockInst.instanceMatrix.needsUpdate = true;
     scene.add(rockInst);
 
-    // 2. Road Network, Skidmarks, center lines, barriers guardrails
+    // 3. Road Network, Skidmarks, center lines, barriers guardrails
     this.buildRoadNetwork(scene, trackHelper);
 
-    // 3. Section Sceneries & Landmarks
+    // 4. Section Sceneries & Landmarks
     buildForest(scene, trackHelper);
     buildVillage(scene, trackHelper);
     buildBridge(scene, trackHelper);
@@ -221,6 +226,9 @@ export class DragonTrackWorld {
     roadMesh.receiveShadow = true;
     scene.add(roadMesh);
 
+    // Bake main road mesh into terrainManager's BVH collision tree
+    terrainManager.bakeRoadMeshBVH([roadMesh]);
+
     // Decorative Yellow Dashed line
     const yellLineGeo = new THREE.BufferGeometry().setFromPoints(centerLinePoints);
     const yellLineMat = new THREE.LineDashedMaterial({
@@ -239,29 +247,49 @@ export class DragonTrackWorld {
     const bRailGeo = new THREE.BoxGeometry(0.1, 0.28, 6);
     const bRailMat = new THREE.MeshStandardMaterial({ color: '#dfdfdf', metalness: 0.9, roughness: 0.15 }); // Chrome steel guardrail
 
-    const createRailsAlongPoints = (pts: THREE.Vector3[]) => {
+    const totalBarrierPosts = leftBarrierPoints.length + rightBarrierPoints.length;
+    const totalBarrierRails = Math.max(0, leftBarrierPoints.length - 1) + Math.max(0, rightBarrierPoints.length - 1);
+
+    const bPostInst = new THREE.InstancedMesh(bPostGeo, bPostMat, totalBarrierPosts);
+    const bRailInst = new THREE.InstancedMesh(bRailGeo, bRailMat, totalBarrierRails);
+
+    bPostInst.castShadow = false;
+    bPostInst.receiveShadow = true;
+    bRailInst.castShadow = false;
+
+    let postIdx = 0;
+    let railIdx = 0;
+    const dummy = new THREE.Object3D();
+
+    const addBarrierRails = (pts: THREE.Vector3[]) => {
       for (let i = 0; i < pts.length; i++) {
-        const post = new THREE.Mesh(bPostGeo, bPostMat);
-        post.position.copy(pts[i]);
-        post.position.y -= 0.2;
-        post.castShadow = true;
-        barrierMeshGroup.add(post);
+        dummy.position.copy(pts[i]);
+        dummy.position.y -= 0.2;
+        dummy.rotation.set(0, 0, 0);
+        dummy.scale.set(1, 1, 1);
+        dummy.updateMatrix();
+        bPostInst.setMatrixAt(postIdx++, dummy.matrix);
 
         if (i < pts.length - 1) {
-          const rail = new THREE.Mesh(bRailGeo, bRailMat);
           const nextPt = pts[i+1];
-          rail.position.copy(pts[i]).add(nextPt).multiplyScalar(0.5);
-          rail.position.y += 0.15;
-          rail.lookAt(nextPt);
+          dummy.position.copy(pts[i]).add(nextPt).multiplyScalar(0.5);
+          dummy.position.y += 0.15;
+          dummy.lookAt(nextPt);
           const segDist = pts[i].distanceTo(nextPt);
-          rail.scale.set(1, 1, segDist / 6); 
-          rail.castShadow = true;
-          barrierMeshGroup.add(rail);
+          dummy.scale.set(1, 1, segDist / 6);
+          dummy.updateMatrix();
+          bRailInst.setMatrixAt(railIdx++, dummy.matrix);
         }
       }
     };
-    createRailsAlongPoints(leftBarrierPoints);
-    createRailsAlongPoints(rightBarrierPoints);
+
+    addBarrierRails(leftBarrierPoints);
+    addBarrierRails(rightBarrierPoints);
+
+    bPostInst.instanceMatrix.needsUpdate = true;
+    bRailInst.instanceMatrix.needsUpdate = true;
+
+    barrierMeshGroup.add(bPostInst, bRailInst);
     scene.add(barrierMeshGroup);
   }
 

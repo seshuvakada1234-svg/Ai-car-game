@@ -1,14 +1,16 @@
 import * as THREE from 'three';
-import { TrackGeometryHelper, getTerrainHeight } from '../utils/track';
+import { TrackGeometryHelper } from '../utils/track';
+import { terrainManager } from './terrainManager';
+import { lodManager } from './lodManager';
 
 export function buildForest(scene: THREE.Scene, trackHelper: TrackGeometryHelper): void {
   // --- OPTIMIZED INSTANCED FACETED FOREST ---
   const treeMaterials = [
-    new THREE.MeshStandardMaterial({ color: '#0c3012', roughness: 0.92, flatShading: true }), // Emerald cluster
-    new THREE.MeshStandardMaterial({ color: '#154a1d', roughness: 0.9, flatShading: true }),  // Forest canopy
-    new THREE.MeshStandardMaterial({ color: '#1a541b', roughness: 0.88, flatShading: true }), // Highland Juniper
-    new THREE.MeshStandardMaterial({ color: '#ff7fa2', roughness: 0.85, flatShading: true }), // Sakura Cherry Blossom Pink!
-    new THREE.MeshStandardMaterial({ color: '#f5faff', roughness: 0.98, flatShading: true }), // Ice Frosted Snow White!
+    new THREE.MeshStandardMaterial({ color: '#092d0d', roughness: 0.92, flatShading: true }), // Spruce Pine Dark Green
+    new THREE.MeshStandardMaterial({ color: '#55872a', roughness: 0.88, flatShading: true }), // Silver Birch Soft Bright Green
+    new THREE.MeshStandardMaterial({ color: '#d38312', roughness: 0.9, flatShading: true }),  // Golden/Rust Autumn Oak
+    new THREE.MeshStandardMaterial({ color: '#2a6a2a', roughness: 0.92, flatShading: true }), // Wild Meadow Shrub
+    new THREE.MeshStandardMaterial({ color: '#edd534', roughness: 0.95, flatShading: true }), // Canola Meadow Flower Yellow
   ];
   const trunkMat = new THREE.MeshStandardMaterial({ color: '#3d2511', roughness: 0.95 });
 
@@ -137,6 +139,7 @@ export function buildForest(scene: THREE.Scene, trackHelper: TrackGeometryHelper
   // --- ALPINE RUSTIC WOODEN FENCES ---
   // Renders logs and wooden barriers wrapping the forest shoulder edges (progress tracking: 0.10 to 0.20)
   const fencesGroup = new THREE.Group();
+  fencesGroup.name = 'scenery_forest_fences';
   const fencePostGeo = new THREE.CylinderGeometry(0.12, 0.12, 1.3, 5);
   const fenceLogGeo = new THREE.CylinderGeometry(0.07, 0.07, 4.25, 5);
   fenceLogGeo.rotateX(Math.PI / 2); // align log horizontally
@@ -147,8 +150,21 @@ export function buildForest(scene: THREE.Scene, trackHelper: TrackGeometryHelper
     flatShading: true
   });
 
-  const forestSplinePts = [];
   const samples = 140;
+  const fencePostInst = new THREE.InstancedMesh(fencePostGeo, fenceWoodMat, 282);
+  const fenceLogInst = new THREE.InstancedMesh(fenceLogGeo, fenceWoodMat, 560);
+
+  fencePostInst.castShadow = false;
+  fencePostInst.receiveShadow = true;
+  fenceLogInst.castShadow = false;
+
+  const fenceDummy = new THREE.Object3D();
+  let postCount = 0;
+  let logCount = 0;
+
+  const postPositionsLeft: THREE.Vector3[] = [];
+  const postPositionsRight: THREE.Vector3[] = [];
+
   for (let s = 0; s <= samples; s++) {
     const u = 0.10 + (s / samples) * 0.10; // Spline progress for Pine Forest (Case 1)
     const pt = trackHelper.curve.getPointAt(u);
@@ -157,49 +173,80 @@ export function buildForest(scene: THREE.Scene, trackHelper: TrackGeometryHelper
     const roadWidth = trackHelper.getRoadWidthAt(u);
 
     // Place fence posts on BOTH left and right shoulders
-    [-1, 1].forEach(side => {
-      const fencePost = new THREE.Mesh(fencePostGeo, fenceWoodMat);
-      const postPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * (roadWidth / 2 + 0.8));
-      
-      // Look up height to ground the post perfectly
-      const terrainY = getTerrainHeight(postPos.x, postPos.z, trackHelper);
-      fencePost.position.set(postPos.x, terrainY + 0.52, postPos.z);
-      fencePost.castShadow = true;
-      fencePost.receiveShadow = true;
-      fencesGroup.add(fencePost);
+    const pL = new THREE.Vector3().copy(pt).addScaledVector(normal, -1 * (roadWidth / 2 + 0.8));
+    pL.y = terrainManager.getHeight(pL.x, pL.z) + 0.52;
+    postPositionsLeft.push(pL);
 
-      // Connect with horizontal logs to preceding fence post
-      if (s > 0) {
-        const prevU = 0.10 + ((s - 1) / samples) * 0.10;
-        const prevPt = trackHelper.curve.getPointAt(prevU);
-        const prevTangent = trackHelper.curve.getTangentAt(prevU).normalize();
-        const prevNormal = new THREE.Vector3(-prevTangent.z, 0, prevTangent.x).normalize();
-        const prevRoadWidth = trackHelper.getRoadWidthAt(prevU);
-        
-        const prevPostPos = new THREE.Vector3().copy(prevPt).addScaledVector(prevNormal, side * (prevRoadWidth / 2 + 0.8));
-        const prevTerrainY = getTerrainHeight(prevPostPos.x, prevPostPos.z, trackHelper);
+    fenceDummy.position.copy(pL);
+    fenceDummy.rotation.set(0, 0, 0);
+    fenceDummy.scale.set(1, 1, 1);
+    fenceDummy.updateMatrix();
+    if (postCount < 282) {
+      fencePostInst.setMatrixAt(postCount++, fenceDummy.matrix);
+    }
 
-        const currentAnchor = new THREE.Vector3(postPos.x, terrainY + 0.85, postPos.z);
-        const previousAnchor = new THREE.Vector3(prevPostPos.x, prevTerrainY + 0.85, prevPostPos.z);
+    const pR = new THREE.Vector3().copy(pt).addScaledVector(normal, 1 * (roadWidth / 2 + 0.8));
+    pR.y = terrainManager.getHeight(pR.x, pR.z) + 0.52;
+    postPositionsRight.push(pR);
 
-        const connectionLog = new THREE.Mesh(fenceLogGeo, fenceWoodMat);
-        // Position at midpoint of the two post heads
-        connectionLog.position.copy(currentAnchor).add(previousAnchor).multiplyScalar(0.5);
-        connectionLog.lookAt(currentAnchor);
-        
-        // Scale connection log length to match exact post distance
-        const dist = currentAnchor.distanceTo(previousAnchor);
-        connectionLog.scale.set(1, 1, dist / 4.25);
-        connectionLog.castShadow = true;
-        fencesGroup.add(connectionLog);
+    fenceDummy.position.copy(pR);
+    fenceDummy.updateMatrix();
+    if (postCount < 282) {
+      fencePostInst.setMatrixAt(postCount++, fenceDummy.matrix);
+    }
 
-        // Add a second lower parallel log
-        const connectionLogLower = connectionLog.clone();
-        connectionLogLower.position.y -= 0.4;
-        fencesGroup.add(connectionLogLower);
+    // Connect with horizontal logs to preceding fence post
+    if (s > 0) {
+      const pL_prev = postPositionsLeft[s - 1];
+      const anchorL_curr = new THREE.Vector3(pL.x, pL.y + 0.33, pL.z);
+      const anchorL_prev = new THREE.Vector3(pL_prev.x, pL_prev.y + 0.33, pL_prev.z);
+
+      fenceDummy.position.copy(anchorL_curr).add(anchorL_prev).multiplyScalar(0.5);
+      fenceDummy.lookAt(anchorL_curr);
+      const distL = anchorL_curr.distanceTo(anchorL_prev);
+      fenceDummy.scale.set(1, 1, distL / 4.25);
+      fenceDummy.updateMatrix();
+      if (logCount < 560) {
+        fenceLogInst.setMatrixAt(logCount++, fenceDummy.matrix);
       }
-    });
+
+      fenceDummy.position.y -= 0.4;
+      fenceDummy.updateMatrix();
+      if (logCount < 560) {
+        fenceLogInst.setMatrixAt(logCount++, fenceDummy.matrix);
+      }
+
+      const pR_prev = postPositionsRight[s - 1];
+      const anchorR_curr = new THREE.Vector3(pR.x, pR.y + 0.33, pR.z);
+      const anchorR_prev = new THREE.Vector3(pR_prev.x, pR_prev.y + 0.33, pR_prev.z);
+
+      fenceDummy.position.copy(anchorR_curr).add(anchorR_prev).multiplyScalar(0.5);
+      fenceDummy.lookAt(anchorR_curr);
+      const distR = anchorR_curr.distanceTo(anchorR_prev);
+      fenceDummy.scale.set(1, 1, distR / 4.25);
+      fenceDummy.updateMatrix();
+      if (logCount < 560) {
+        fenceLogInst.setMatrixAt(logCount++, fenceDummy.matrix);
+      }
+
+      fenceDummy.position.y -= 0.4;
+      fenceDummy.updateMatrix();
+      if (logCount < 560) {
+        fenceLogInst.setMatrixAt(logCount++, fenceDummy.matrix);
+      }
+    }
   }
 
+  fencePostInst.instanceMatrix.needsUpdate = true;
+  fenceLogInst.instanceMatrix.needsUpdate = true;
+
+  fencesGroup.add(fencePostInst, fenceLogInst);
   scene.add(fencesGroup);
+
+  lodManager.registerSector(
+    'Forest Fences',
+    800, 20, 1100,
+    fencesGroup,
+    280, 520
+  );
 }

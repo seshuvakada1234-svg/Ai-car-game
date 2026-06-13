@@ -6,67 +6,67 @@
 import * as THREE from 'three';
 import { TrackNode, Checkpoint, Vector3D } from '../types';
 
-// Massive 10 KM Dragon Mountain Pass Control Points
+// Massive 10 KM European Countryside Pass Control Points
 // Loop length translates to exactly ~10.1 Kilometers in World Space
 export const TRACK_CONTROL_POINTS: TrackNode[] = [
-  // Zone 0: Start Area (0-1 KM, u: 0.0 - 0.1)
-  { position: { x: 0, y: 0, z: 0 }, width: 26, type: 'straight' },       // 0: Start Grid / Finish line
-  { position: { x: 100, y: 2, z: 180 }, width: 26, type: 'straight' },    // 1: Spaced grandstand straight 1
-  { position: { x: 250, y: 6, z: 400 }, width: 26, type: 'straight' },    // 2: Spaced grandstand straight 2
-  { position: { x: 450, y: 10, z: 620 }, width: 24, type: 'straight' },   // 3: Pine forest transition entry
+  // Zone 0: Start Area (0-1 KM, u: 0.0 - 0.1) - Meadows & paddocks
+  { position: { x: 0, y: 5, z: 0 }, width: 24, type: 'straight' },       // 0: Start Grid / Finish line
+  { position: { x: 100, y: 6, z: 180 }, width: 24, type: 'straight' },    // 1: Scenic farm track adjacent
+  { position: { x: 250, y: 8, z: 400 }, width: 24, type: 'straight' },    // 2: Open meadows paddock straight
+  { position: { x: 450, y: 10, z: 620 }, width: 22, type: 'straight' },   // 3: Woodland entry transition
 
-  // Zone 1: Dense Pine Forest (1-2 KM, u: 0.1 - 0.2)
-  { position: { x: 650, y: 18, z: 850 }, width: 22, type: 'normal' },     // 4: Thick pine tree gateway
-  { position: { x: 800, y: 22, z: 1100 }, width: 22, type: 'normal' },    // 5: Gentle canopy lefthand sweep
-  { position: { x: 950, y: 15, z: 1350 }, width: 22, type: 'normal' },    // 6: Gentle canopy righthand sweep
-  { position: { x: 1100, y: 10, z: 1600 }, width: 22, type: 'normal' },   // 7: Descending towards village gateways
+  // Zone 1: Dense Forest (Birch, Oak, Pine) (1-2 KM, u: 0.1 - 0.2)
+  { position: { x: 650, y: 12, z: 850 }, width: 22, type: 'normal' },     // 4: Canopy gateway
+  { position: { x: 800, y: 14, z: 1100 }, width: 22, type: 'normal' },    // 5: Gentle woodland lefthand sweep
+  { position: { x: 950, y: 13, z: 1350 }, width: 22, type: 'normal' },    // 6: Gentle woodland righthand sweep
+  { position: { x: 1100, y: 10, z: 1600 }, width: 22, type: 'normal' },   // 7: Emerging into village outskirts
 
-  // Zone 2: Mountain Village (2-3 KM, u: 0.2 - 0.3)
-  { position: { x: 1200, y: 8, z: 1850 }, width: 20, type: 'normal' },    // 8: Japanese gateway arch entry
-  { position: { x: 1300, y: 5, z: 2150 }, width: 20, type: 'normal' },    // 9: Narrow village lanterns bypass
-  { position: { x: 1350, y: 10, z: 2450 }, width: 20, type: 'normal' },   // 10: Central wooden bazaar bridge
-  { position: { x: 1300, y: 20, z: 2750 }, width: 22, type: 'normal' },   // 11: Steep exit climbing turn
+  // Zone 2: European Village (German / Swiss styled Fachwerk houses) (2-3 KM, u: 0.2 - 0.3)
+  { position: { x: 1200, y: 8, z: 1850 }, width: 20, type: 'normal' },    // 8: Cozy town boundary entry
+  { position: { x: 1300, y: 7, z: 2150 }, width: 20, type: 'normal' },    // 9: Narrow village stone path
+  { position: { x: 1350, y: 8, z: 2450 }, width: 20, type: 'normal' },    // 10: Central wooden bazaar bridge
+  { position: { x: 1300, y: 11, z: 2750 }, width: 22, type: 'normal' },   // 11: Gentle exit climb towards lake
 
-  // Zone 3: Red Suspension Bridge (3-4 KM, u: 0.3 - 0.4)
-  { position: { x: 1200, y: 35, z: 3050 }, width: 24, type: 'bridge' },   // 12: High concrete support base
-  { position: { x: 1000, y: 35, z: 3300 }, width: 24, type: 'bridge' },   // 13: Floating over giant canyon bottom
-  { position: { x: 750, y: 35, z: 3450 }, width: 24, type: 'bridge' },    // 14: Above misty deep canyon river
-  { position: { x: 500, y: 30, z: 3500 }, width: 24, type: 'bridge' },    // 15: Cliff face bridge exit
+  // Zone 3: Lake Stone Arch Bridge (3-4 KM, u: 0.3 - 0.4)
+  { position: { x: 1200, y: 12, z: 3050 }, width: 22, type: 'bridge' },   // 12: Stone bridge approach base
+  { position: { x: 1000, y: 12, z: 3300 }, width: 22, type: 'bridge' },   // 13: Floating over tranquil countryside lake
+  { position: { x: 750, y: 12, z: 3450 }, width: 22, type: 'bridge' },    // 14: Scenic stone pillars alignment
+  { position: { x: 500, y: 11, z: 3500 }, width: 22, type: 'bridge' },    // 15: Low coast edge bridge exit
 
-  // Zone 4: Neon Tunnel (4-5 KM, u: 0.4 - 0.5)
-  { position: { x: 250, y: 22, z: 3400 }, width: 18, type: 'tunnel' },    // 16: Neon mountain entry portal
-  { position: { x: 100, y: 10, z: 3200 }, width: 18, type: 'tunnel' },    // 17: Sweeping blue LED tube vault
-  { position: { x: 0, y: -6, z: 2950 }, width: 18, type: 'tunnel' },     // 18: Underground canyon bypass curve
-  { position: { x: -80, y: -16, z: 2700 }, width: 18, type: 'tunnel' },   // 19: Portal exit curve
+  // Zone 4: Gentle Meadows & Windmill Fields (4-5 KM, u: 0.4 - 0.5) - Replacing the neon tunnel
+  { position: { x: 250, y: 12, z: 3400 }, width: 22, type: 'normal' },    // 16: Sunny pasture road entrance
+  { position: { x: 100, y: 14, z: 3200 }, width: 22, type: 'normal' },    // 17: Rolling meadow curves
+  { position: { x: 0, y: 15, z: 2950 }, width: 22, type: 'normal' },     // 18: Wheat field bypass
+  { position: { x: -80, y: 16, z: 2700 }, width: 22, type: 'normal' },    // 19: Pasture boundary curve
 
-  // Zone 5: Waterfall Valley (5-6 KM, u: 0.5 - 0.6)
-  { position: { x: -150, y: -11, z: 2400 }, width: 22, type: 'normal' },  // 20: Emerald cascade valley entrance
-  { position: { x: -280, y: -9, z: 2100 }, width: 22, type: 'normal' },   // 21: Moist valley boulder corridor
-  { position: { x: -450, y: -3, z: 1800 }, width: 22, type: 'normal' },   // 22: Cascade viewing bridge road
-  { position: { x: -600, y: 14, z: 1550 }, width: 22, type: 'normal' },   // 23: Low cliff pass ascent
+  // Zone 5: River Stream & Old Watermill (5-6 KM, u: 0.5 - 0.6)
+  { position: { x: -150, y: 15, z: 2400 }, width: 22, type: 'normal' },  // 20: Brookside valley portal
+  { position: { x: -280, y: 13, z: 2100 }, width: 22, type: 'normal' },   // 21: Stream-side dirt corridor
+  { position: { x: -450, y: 12, z: 1800 }, width: 22, type: 'normal' },   // 22: Traditional watermill view curve
+  { position: { x: -600, y: 14, z: 1550 }, width: 22, type: 'normal' },   // 23: Quiet valley ascent
 
-  // Zone 6: Hairpin Roads (6-7 KM, u: 0.6 - 0.7)
-  { position: { x: -750, y: 35, z: 1300 }, width: 18, type: 'hairpin' },  // 24: Sharp warning wall L1
-  { position: { x: -900, y: 65, z: 1050 }, width: 18, type: 'hairpin' },  // 25: Cliff barrier switchback curve
-  { position: { x: -750, y: 95, z: 800 }, width: 18, type: 'hairpin' },   // 26: Rocky peak switchback curve
-  { position: { x: -900, y: 120, z: 550 }, width: 18, type: 'hairpin' },  // 27: Temple summit peak turnout
+  // Zone 6: Farm Lands & Golden Hay Fields (6-7 KM, u: 0.6 - 0.7) - replacing hairpins
+  { position: { x: -750, y: 18, z: 1300 }, width: 20, type: 'normal' },  // 24: Barnyard side sweep
+  { position: { x: -900, y: 20, z: 1050 }, width: 20, type: 'normal' },   // 25: Hay bales field curve
+  { position: { x: -750, y: 22, z: 800 }, width: 20, type: 'normal' },    // 26: Grain silo roadside path
+  { position: { x: -900, y: 24, z: 550 }, width: 20, type: 'normal' },    // 27: Tractor road turnout
 
-  // Zone 7: Dragon Temple (7-8 KM, u: 0.7 - 0.8)
-  { position: { x: -700, y: 110, z: 300 }, width: 22, type: 'normal' },   // 28: Traditional torii gate portal
-  { position: { x: -450, y: 90, z: 120 }, width: 22, type: 'normal' },    // 29: Crimson pagoda cherry blossom drive
-  { position: { x: -200, y: 70, z: -20 }, width: 22, type: 'normal' },    // 30: Stone stairs bridge descent
-  { position: { x: -50, y: 55, z: -170 }, width: 22, type: 'normal' },    // 31: Exit temple ridge S-bend
+  // Zone 7: Grazing Valleys & Wildflower S-Bends (7-8 KM, u: 0.7 - 0.8) - replacing pagoda temple
+  { position: { x: -700, y: 22, z: 300 }, width: 22, type: 'normal' },    // 28: Rustic fence entry corridor
+  { position: { x: -450, y: 18, z: 120 }, width: 22, type: 'normal' },    // 29: Sheep & cow pastures border S-bend
+  { position: { x: -200, y: 15, z: -20 }, width: 22, type: 'normal' },    // 30: Small stone bridge descent
+  { position: { x: -50, y: 11, z: -170 }, width: 22, type: 'normal' },    // 31: Exit pastures ridge
 
-  // Zone 8: Long Highway (8-9 KM, u: 0.8 - 0.9)
-  { position: { x: -100, y: 35, z: -420 }, width: 26, type: 'straight' },  // 32: Speed corridor high-rise viaduct
-  { position: { x: -300, y: 22, z: -720 }, width: 26, type: 'straight' },  // 33: Flat highway speed straight
-  { position: { x: -500, y: 12, z: -1070 }, width: 26, type: 'straight' }, // 34: Multi-lane Billboard speedway
-  { position: { x: -600, y: 5, z: -1420 }, width: 26, type: 'straight' },  // 35: High speed exit transition
+  // Zone 8: Rural Highway Corridor (8-9 KM, u: 0.8 - 0.9)
+  { position: { x: -100, y: 10, z: -420 }, width: 24, type: 'straight' },  // 32: Standard countryside dual lane
+  { position: { x: -300, y: 9, z: -720 }, width: 24, type: 'straight' },   // 33: Flat highway speedway
+  { position: { x: -500, y: 7, z: -1070 }, width: 24, type: 'straight' },  // 34: Billboard speedway
+  { position: { x: -600, y: 6, z: -1420 }, width: 24, type: 'straight' },  // 35: High speed exit bend
 
-  // Zone 9: Finish Area (9-10 KM, u: 0.9 - 1.0)
-  { position: { x: -400, y: 0, z: -1720 }, width: 24, type: 'straight' },  // 36: Final spectator grand bend
-  { position: { x: -150, y: -2, z: -1420 }, width: 24, type: 'straight' }, // 37: Loop back high straight
-  { position: { x: -50, y: -1, z: -720 }, width: 24, type: 'straight' },   // 38: Pre-finish gate stretch
+  // Zone 9: Spectator Resort & Finish Area (9-10 KM, u: 0.9 - 1.0)
+  { position: { x: -400, y: 6, z: -1720 }, width: 24, type: 'straight' },  // 36: Cozy village inn bend
+  { position: { x: -150, y: 5, z: -1420 }, width: 24, type: 'straight' },  // 37: Paved straightaway approach
+  { position: { x: -50, y: 5, z: -720 }, width: 24, type: 'straight' },    // 38: Pre-finish gate stretch
 ];
 
 // Deterministic 2D Perlin noise implementation for multi-octave terrain generation
@@ -124,30 +124,29 @@ function perlinNoise2d(x: number, y: number): number {
 
 function noiseFBm(x: number, z: number, octaves: number = 6): number {
   let total = 0;
-  let frequency = 0.00015; // wide expansive landscapes
+  let frequency = 0.00012; // wide expansive countryside landscapes
   let amplitude = 1.0;
   let maxValue = 0;
 
   for (let i = 0; i < octaves; i++) {
     total += perlinNoise2d(x * frequency, z * frequency) * amplitude;
     maxValue += amplitude;
-    amplitude *= 0.5;
-    frequency *= 2.3;
+    amplitude *= 0.52;
+    frequency *= 2.1;
   }
 
   return total / maxValue;
 }
 
-// Giant, majestic alpine peaks matching the Forza / Horizon request
-// Perfectly sculpted with smoothstep radial falloff inside getTerrainHeight
+// Gentle rolling European countryside hills (replaces sharp mountain peaks)
 const PEAKS = [
-  { x: -1600, z: -1500, radius: 1100, height: 520 }, // High snow peaks (Zone 9)
-  { x: -2000, z: 800, radius: 1000, height: 490 },  // Alpine ridge
-  { x: 1650, z: -1900, radius: 1150, height: 550 },  // Massive northeast backdrop
-  { x: 2100, z: 1100, radius: 1000, height: 460 },  // Canyon flanks
-  { x: -700, z: 2300, radius: 900, height: 350 },   // Waterfall mountain range
-  { x: 1100, z: 2600, radius: 1050, height: 410 },  // Village pass peak
-  { x: 110, y: 10, z: 3100, radius: 450, height: 260 }, // Solid rock massif encasing neon tunnel portals
+  { x: -1600, z: -1500, radius: 1500, height: 60 }, // Smooth low northwest hills
+  { x: -2000, z: 800, radius: 1400, height: 50 },  // Flowing grassy slopes
+  { x: 1650, z: -1900, radius: 1600, height: 70 },  // Gentle landscape backdrop
+  { x: 2100, z: 1100, radius: 1500, height: 55 },  // Meadow flanking mounds
+  { x: -700, z: 2300, radius: 1300, height: 45 },   // Soft brookside slopes
+  { x: 1100, z: 2600, radius: 1400, height: 48 },  // Village bordering mounds
+  { x: 110, y: 10, z: 3100, radius: 800, height: 35 }, // Low hills near meadows
 ];
 
 // High fidelity fully-integrated terrain height function with smooth carving around road splines
@@ -156,17 +155,17 @@ export function getTerrainHeight(x: number, z: number, trackHelper?: any): numbe
   
   // 1. Continuous Multi-Octave Perlin noise base (6 octaves for granular valleys and hills)
   const rawNoise = noiseFBm(x, z, 6);
-  let baseHeight = rawNoise * 145.0; // scale noise range beautifully
+  let baseHeight = rawNoise * 42.0 + 8.0; // scale noise range beautifully for rolling hills (between 8 and 50 meters base)
   
-  // Create beautiful, natural surrounding alpine ridge barriers (outer edges)
-  if (distFromCenter > 380) {
-    baseHeight += (distFromCenter - 380) * 0.45;
+  // Create beautiful, natural surrounding rolling countryside crests (outer boundary frames)
+  if (distFromCenter > 420) {
+    baseHeight += (distFromCenter - 420) * 0.15;
   } else {
-    baseHeight += (distFromCenter - 380) * 0.05;
+    baseHeight += (distFromCenter - 420) * 0.02;
   }
 
-  // 2. Sculpt Actual Mountain Masses (Smoothstep Radial Falloff)
-  let mountainHeight = 0;
+  // 2. Sculpt Actual Rolling Countryside Hills (Smoothstep Radial Falloff)
+  let hillHeight = 0;
   for (const p of PEAKS) {
     const dx = x - p.x;
     const dz = z - p.z;
@@ -174,40 +173,40 @@ export function getTerrainHeight(x: number, z: number, trackHelper?: any): numbe
     if (dist < p.radius) {
       const t = dist / p.radius;
       const falloff = 1.0 - t * t * (3 - 2 * t); // smoothstep radial blend
-      mountainHeight += p.height * Math.pow(falloff, 1.6);
+      hillHeight += p.height * Math.pow(falloff, 1.5);
     }
   }
-  baseHeight += mountainHeight;
+  baseHeight += hillHeight;
   
   // 3. Zone Specific Geography Sculptures
-  // Emerald Jade Lake Bed (centered around Zone 9 transition)
+  // Tranquil European Lake Bed (centered around original Zone 9, coordinates x=50, z=-120)
   const distToLake = Math.sqrt(Math.pow(x - 50, 2) + Math.pow(z + 120, 2));
   if (distToLake < 250) {
     const lakeFactor = Math.cos(Math.min(1.0, distToLake / 250) * Math.PI / 2);
     const smoothFactor = lakeFactor * lakeFactor * (3 - 2 * lakeFactor);
-    baseHeight = THREE.MathUtils.lerp(baseHeight, -10.2, smoothFactor);
+    baseHeight = THREE.MathUtils.lerp(baseHeight, 1.2, smoothFactor); // shallow 1.2m lake bottom (lake surface is 4.0m)
   }
 
-  // Spectacular Deep Canyon Gorge under the suspension bridge (z: 2900 to 3550, x: center around 900)
+  // Countryside Stream/River under the stone bridge (z: 2850 to 3600, x: center around 900)
   if (z > 2850 && z < 3600) {
-    const distToCanyonCenter = Math.abs(x - 900); 
-    if (distToCanyonCenter < 380) {
-      const uCanyon = distToCanyonCenter / 380;
-      const sFactor = 1.0 - uCanyon * uCanyon * (3 - 2 * uCanyon); // smoothstep vertical drop
-      const canyonFloor = -85.0 + Math.sin(z * 0.05) * 6; // deep rocky bottom!
-      baseHeight = THREE.MathUtils.lerp(baseHeight, canyonFloor, sFactor);
+    const distToRiverCenter = Math.abs(x - 900); 
+    if (distToRiverCenter < 280) {
+      const uRiver = distToRiverCenter / 280;
+      const sFactor = 1.0 - uRiver * uRiver * (3 - 2 * uRiver); // smoothstep vertical drop
+      const riverDepth = 3.5 + Math.sin(z * 0.04) * 0.5; // tranquil shallow stream bed (river surface is 9.0m)
+      baseHeight = THREE.MathUtils.lerp(baseHeight, riverDepth, sFactor * 0.88);
     }
   }
 
-  // Waterfall valley pool bed (near coordinates x: -150, z: 2400)
+  // Brookside valley pool bed (near coordinates x: -150, z: 2400)
   const distToWaterfall = Math.sqrt(Math.pow(x + 150, 2) + Math.pow(z - 2400, 2));
-  if (distToWaterfall < 340) {
-    const wfFactor = Math.min(1.0, distToWaterfall / 340);
+  if (distToWaterfall < 300) {
+    const wfFactor = Math.min(1.0, distToWaterfall / 300);
     const sFactor = 1.0 - wfFactor * wfFactor * (3 - 2 * wfFactor);
-    baseHeight = THREE.MathUtils.lerp(baseHeight, -35.0, sFactor * 0.95);
+    baseHeight = THREE.MathUtils.lerp(baseHeight, 3.8, sFactor * 0.90); // shallow water bed (surface is 9.0m)
   }
 
-  // 4. Dynamic Road Corridors Carving & Tunnel Mountain Solidness
+  // 4. Dynamic Road Corridors Carving
   if (trackHelper) {
     const info = trackHelper.getNearestTrackInfo(new THREE.Vector3(x, 0, z));
     const rType = trackHelper.getRoadTypeAt(info.progress);
@@ -216,25 +215,7 @@ export function getTerrainHeight(x: number, z: number, trackHelper?: any): numbe
     const flatZone = halfWidth + 1.25; // zero-clipping road shoulder
     const blendZone = 36.0;            // smooth shoulder ramp
 
-    if (rType === 'tunnel') {
-      // Build an extremely thick solid rock dome of 35-50m above the tunnel curve
-      if (info.distanceToTrack < 75) {
-        const blend = info.distanceToTrack / 75;
-        const s = blend * blend * (3 - 2 * blend);
-        
-        const mountainTopY = info.nearestPoint.y + 45.0; // 45m thick rock layers!
-        const isNearMouth = (info.progress < 0.41) || (info.progress > 0.49);
-        
-        let targetMountainY = mountainTopY;
-        if (isNearMouth) {
-          const mouthDist = Math.min(Math.abs(info.progress - 0.40), Math.abs(info.progress - 0.50));
-          const mouthBlend = Math.min(1.0, mouthDist * 20.0);
-          targetMountainY = THREE.MathUtils.lerp(info.nearestPoint.y + 5.5, mountainTopY, mouthBlend);
-        }
-
-        baseHeight = THREE.MathUtils.lerp(targetMountainY, baseHeight, s);
-      }
-    } else if (rType !== 'bridge') {
+    if (rType !== 'bridge') {
       // Standard ground shoulder beds carved level with spline
       if (info.distanceToTrack < flatZone) {
         baseHeight = info.nearestPoint.y - 0.18;
@@ -248,7 +229,7 @@ export function getTerrainHeight(x: number, z: number, trackHelper?: any): numbe
   }
 
   // Final clamp to prevent dropping below map bedrock level
-  return Math.max(-95.0, baseHeight);
+  return Math.max(-10.0, baseHeight);
 }
 
 // File-scope scratchpad vectors to avoid garbage collection memory leaks in high-frequency loops
@@ -260,6 +241,7 @@ export class TrackGeometryHelper {
   cachedPoints: THREE.Vector3[];
   checkpoints: Checkpoint[] = [];
   length: number;
+  public carLastIndexMap = new Map<string, number>();
   
   // High fidelity scenery distribution structures
   trees: { position: THREE.Vector3; scale: number; type: number }[] = [];
@@ -363,7 +345,7 @@ export class TrackGeometryHelper {
   }
 
   // Fast math projecting player positions directly upon closest spline segment
-  getNearestTrackInfo(pos: THREE.Vector3) {
+  getNearestTrackInfo(pos: THREE.Vector3, carId?: string) {
     try {
       if (!pos || typeof pos.distanceToSquared !== 'function' || isNaN(pos.x) || isNaN(pos.y) || isNaN(pos.z)) {
         return {
@@ -383,17 +365,34 @@ export class TrackGeometryHelper {
       const pointsLength = this.cachedPoints ? this.cachedPoints.length : 0;
       const samples = Math.min(2000, pointsLength);
 
-      if (samples > 0) {
-        for (let i = 0; i < samples; i++) {
-          const u = i / samples;
+      let foundIndex = -1;
+      let lastCachedIdx = carId ? this.carLastIndexMap.get(carId) : undefined;
+
+      if (lastCachedIdx !== undefined && samples > 0) {
+        // Fast search: scan +-20 points around cached index
+        for (let offset = -20; offset <= 20; offset++) {
+          const i = (lastCachedIdx + offset + samples) % samples;
           const pt = this.cachedPoints[i];
           if (!pt || typeof pt.distanceToSquared !== 'function') continue;
-          
           const distSq = pos.distanceToSquared(pt);
           if (!isNaN(distSq) && distSq < minDistance) {
             minDistance = distSq;
-            nearestProgress = u;
+            nearestProgress = i / samples;
             nearestPoint.copy(pt);
+            foundIndex = i;
+          }
+        }
+      } else if (samples > 0) {
+        // Full scan fallback
+        for (let i = 0; i < samples; i++) {
+          const pt = this.cachedPoints[i];
+          if (!pt || typeof pt.distanceToSquared !== 'function') continue;
+          const distSq = pos.distanceToSquared(pt);
+          if (!isNaN(distSq) && distSq < minDistance) {
+            minDistance = distSq;
+            nearestProgress = i / samples;
+            nearestPoint.copy(pt);
+            foundIndex = i;
           }
         }
       } else {
@@ -410,6 +409,10 @@ export class TrackGeometryHelper {
         }
       }
 
+      if (carId && foundIndex !== -1) {
+        this.carLastIndexMap.set(carId, foundIndex);
+      }
+
       let preciseProgress = nearestProgress;
       if (isNaN(preciseProgress) || preciseProgress === undefined || preciseProgress === null) {
         preciseProgress = 0;
@@ -422,7 +425,7 @@ export class TrackGeometryHelper {
           if (isNaN(u) || u === undefined || u === null) u = 0.0;
           try {
             this.curve.getPointAt(u, tempPt);
-            if (tempPt && typeof tempPt.distanceToSquared === 'function' && typeof pos.distanceToSquared === 'function') {
+            if (tempPt && typeof tempPt.distanceToSquared !== 'undefined' && typeof pos.distanceToSquared !== 'undefined') {
               const distSq = pos.distanceToSquared(tempPt);
               if (!isNaN(distSq) && distSq < minDistance) {
                 minDistance = distSq;
@@ -476,7 +479,7 @@ export class TrackGeometryHelper {
     }
   }
 
-  // Procedural distribution of scenery matching 10 distinct thematic zones
+  // Procedural distribution of scenery matching 10 distinct thematic European zones
   private generateSceneryDistributions() {
     let seed = 98765;
     const random = () => {
@@ -484,29 +487,29 @@ export class TrackGeometryHelper {
       return x - Math.floor(x);
     };
 
-    // 1. Mountains - We don't use low-poly pyramids anymore!
-    // We populate this array to define where the giant peaks sit on the heightmap for logic or triggers
+    // 1. Hills and ridges
     const peakConfigs = [
-      { x: -1600, z: -1500, radius: 450, height: 350 },
-      { x: -1800, z: 800, radius: 400, height: 320 },
-      { x: 1200, z: -1800, radius: 520, height: 390 },
-      { x: 1800, z: 1200, radius: 480, height: 360 },
-      { x: -400, z: 2200, radius: 350, height: 280 },
-      { x: 800, z: 2500, radius: 380, height: 300 }
+      { x: -1600, z: -1500, radius: 1500, height: 60 },
+      { x: -2000, z: 800, radius: 1400, height: 50 },
+      { x: 1650, z: -1900, radius: 1600, height: 70 },
+      { x: 2100, z: 1100, radius: 1500, height: 55 },
+      { x: -700, z: 2300, radius: 1300, height: 45 },
+      { x: 1100, z: 2600, radius: 1400, height: 48 }
     ];
     for (const p of peakConfigs) {
       this.mountains.push({
-        position: new THREE.Vector3(p.x, -15, p.z),
-        radius: p.radius,
-        height: p.height
+         position: new THREE.Vector3(p.x, -5, p.z),
+         radius: p.radius,
+         height: p.height
       });
     }
 
-    // Adjust specific zone dynamic coordinates
-    this.pagodaPos = new THREE.Vector3(-450, getTerrainHeight(-450, 150, this), 150); // Set Pagoda perfectly in Zone 7: Dragon Temple
+    // Align specific landmarks
+    this.pagodaPos = new THREE.Vector3(-450, getTerrainHeight(-450, 120, this), 120); // Central Town Church
+    this.waterfallPos = new THREE.Vector3(-150, getTerrainHeight(-150, 2400, this) + 2, 2400); // Old Brookside Watermill
 
-    // 2. Sample 1400 dense points along the track to populate high-fidelity scenery
-    const steps = 1400;
+    // 2. Sample 2000 detailed points along the course to achieve heavy forest density (10,000+ trees)
+    const steps = 2000;
     for (let j = 0; j < steps; j++) {
       const u = j / steps;
       const zoneIdx = Math.floor(u * 10); // 10 distinct zones
@@ -517,187 +520,184 @@ export class TrackGeometryHelper {
       const rType = this.getRoadTypeAt(u);
       const headingAngle = Math.atan2(tangent.x, tangent.z);
 
-      const isInsideRestricted = (rType === 'tunnel' || rType === 'bridge');
+      const isInsideRestricted = (rType === 'bridge');
+
+      // Heavy open-world tree generation (forest density covers all background hills)
+      if (!isInsideRestricted) {
+        // Spawn 4 to 8 trees in random placement clusters at every step
+        const clusterCount = 4 + Math.floor(random() * 5);
+        for (let tc = 0; tc < clusterCount; tc++) {
+          const side = random() > 0.5 ? 1 : -1;
+          // Spawn near-road buffers and heavy deep mountain clusters
+          const treeOffset = roadWidth / 2 + 5.0 + random() * 140.0;
+          const treePos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * treeOffset);
+          treePos.y = getTerrainHeight(treePos.x, treePos.z, this);
+
+          // Select tree type:
+          // 0 = Spruce Pine, 1 = Silver Birch, 2 = Autumn Oak, 3 = Shrub Bush, 4 = Wildflower
+          let tType = 0;
+          const rand = random();
+          if (rand < 0.35) {
+            tType = 0; // Pine
+          } else if (rand < 0.65) {
+            tType = 1; // Birch
+          } else if (rand < 0.82) {
+            tType = 2; // Oak
+          } else {
+            tType = 3; // Shrub
+          }
+
+          this.trees.push({
+            position: treePos,
+            scale: 0.8 + random() * 1.5,
+            type: tType
+          });
+        }
+      }
 
       switch (zoneIdx) {
-        case 0: // ZONE 0: START AREA (u: 0.0 - 0.1)
-          // Add festive lights, banners, and grandstands
-          if (j % 24 === 0) {
-            const side = (j % 48 === 0) ? 1 : -1;
-            const standPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * (roadWidth / 2 + 14.5));
-            standPos.y = getTerrainHeight(standPos.x, standPos.z, this) - 0.2;
+        case 0: // ZONE 0: START AREA (u: 0.0 - 0.1) - Meadows & Paddocks
+          if (j % 30 === 0) {
+            const side = (j % 60 === 0) ? 1 : -1;
+            const standPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * (roadWidth / 2 + 13.0));
+            standPos.y = getTerrainHeight(standPos.x, standPos.z, this) - 0.1;
             this.grandstands.push({
               position: standPos,
-              scale: new THREE.Vector3(12, 6, 24),
+              scale: new THREE.Vector3(10, 5, 20),
               rotation: headingAngle + (side * Math.PI / 2)
             });
           }
-          if (j % 16 === 0) {
-            const side = (j % 32 === 0) ? 1 : -1;
-            const flagPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * (roadWidth / 2 + 1.8));
-            flagPos.y = getTerrainHeight(flagPos.x, flagPos.z, this) + 4.5;
-            this.lights.push({ position: flagPos, color: '#00f6ff', intensity: 2.5 });
+          if (j % 20 === 0) {
+            const side = (j % 40 === 0) ? 1 : -1;
+            const flagPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * (roadWidth / 2 + 2.0));
+            flagPos.y = getTerrainHeight(flagPos.x, flagPos.z, this) + 4.0;
+            this.lights.push({ position: flagPos, color: '#ffeaad', intensity: 2.0 }); // warm morning glow lamp
           }
           break;
 
-        case 1: // ZONE 1: DENSE PINE FOREST (u: 0.1 - 0.2)
-          // Thousands of towering evergreens framing the forest sector
-          if (!isInsideRestricted) {
-            const fillCount = 3 + Math.floor(random() * 4);
-            for (let f = 0; f < fillCount; f++) {
-              const side = random() > 0.5 ? 1 : -1;
-              const treeDist = roadWidth / 2 + 4.5 + random() * 60;
-              const tPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * treeDist);
-              tPos.y = getTerrainHeight(tPos.x, tPos.z, this);
-              this.trees.push({
-                position: tPos,
-                scale: 0.9 + random() * 1.8,
-                type: Math.floor(random() * 3) // Standard Emerald/Juniper/Forest Pine varieties (0, 1, 2)
-              });
-            }
-          }
+        case 1: // ZONE 1: DENSE FOREST (Birch, Oak, Pine) (u: 0.1 - 0.2)
+          // Handled by the heavy open tree generator above
           break;
 
-        case 2: // ZONE 2: MOUNTAIN VILLAGE (u: 0.2 - 0.3)
-          // Japanese villages on borders
-          if (!isInsideRestricted && j % 12 === 0) {
+        case 2: // ZONE 2: COZY GERMAN/SWISS COUNTRY VILLAGE (u: 0.2 - 0.3)
+          if (!isInsideRestricted && j % 15 === 0) {
             const side = random() > 0.5 ? 1 : -1;
-            const houseDist = roadWidth / 2 + 8.0 + random() * 10;
+            const houseDist = roadWidth / 2 + 6.5 + random() * 8;
             const hPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * houseDist);
             hPos.y = getTerrainHeight(hPos.x, hPos.z, this) - 0.1;
             
             this.villageHouses.push({
               position: hPos,
-              scale: 1.1 + random() * 0.45,
-              rotation: headingAngle + (side * Math.PI / 2) + (random() * 0.12 - 0.06)
+              scale: 1.0 + random() * 0.4,
+              rotation: headingAngle + (side * Math.PI / 2) + (random() * 0.1 - 0.05)
             });
 
             // Street lamps
-            const lanPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * (roadWidth / 2 + 1.8));
-            lanPos.y = getTerrainHeight(lanPos.x, lanPos.z, this) + 2.4;
-            this.lights.push({ position: lanPos, color: '#ff7700', intensity: 3.2 });
+            const lanPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * (roadWidth / 2 + 1.5));
+            lanPos.y = getTerrainHeight(lanPos.x, lanPos.z, this) + 2.5;
+            this.lights.push({ position: lanPos, color: '#ff9900', intensity: 3.5 }); // Cozy golden orange streetlights
           }
           break;
 
-        case 3: // ZONE 3: RED SUSPENSION BRIDGE (u: 0.3 - 0.4)
-          // Scenic canyon rocks below the bridge
-          if (rType === 'bridge' && j % 12 === 0) {
-            const bLeft = new THREE.Vector3().copy(pt).addScaledVector(normal, -38 - random() * 22);
-            const bRight = new THREE.Vector3().copy(pt).addScaledVector(normal, 38 + random() * 22);
-            bLeft.y = getTerrainHeight(bLeft.x, bLeft.z, this) + 12;
-            bRight.y = getTerrainHeight(bRight.x, bRight.z, this) + 12;
+        case 3: // ZONE 3: LAKE & STONE BRIDGE ROAD (u: 0.3 - 0.4)
+          if (rType === 'bridge' && j % 15 === 0) {
+            const bLeft = new THREE.Vector3().copy(pt).addScaledVector(normal, -18 - random() * 10);
+            const bRight = new THREE.Vector3().copy(pt).addScaledVector(normal, 18 + random() * 10);
+            bLeft.y = getTerrainHeight(bLeft.x, bLeft.z, this) + 3;
+            bRight.y = getTerrainHeight(bRight.x, bRight.z, this) + 3;
 
             this.rocks.push({
               position: bLeft,
-              scale: new THREE.Vector3(14 + random() * 8, 30 + random() * 20, 14 + random() * 8),
+              scale: new THREE.Vector3(6 + random() * 4, 10 + random() * 12, 6 + random() * 4),
               rotation: new THREE.Euler(0, random() * Math.PI, 0)
             });
             this.rocks.push({
               position: bRight,
-              scale: new THREE.Vector3(14 + random() * 8, 30 + random() * 20, 14 + random() * 8),
+              scale: new THREE.Vector3(6 + random() * 4, 10 + random() * 12, 6 + random() * 4),
               rotation: new THREE.Euler(0, random() * Math.PI, 0)
             });
           }
           break;
 
-        case 4: // ZONE 4: NEON TUNNEL (u: 0.4 - 0.5)
-          // Brilliant cyan-blue LED arches lining the cave track
-          if (rType === 'tunnel' && j % 5 === 0) {
-            const nLeft = new THREE.Vector3().copy(pt).addScaledVector(normal, -roadWidth / 2 + 0.4);
-            const nRight = new THREE.Vector3().copy(pt).addScaledVector(normal, roadWidth / 2 - 0.4);
-            // Height is placed along road bed
-            nLeft.y = pt.y + 0.1;
-            nRight.y = pt.y + 0.1;
-
-            this.lights.push({ position: nLeft, color: '#00ccff', intensity: 3.8 });
-            this.lights.push({ position: nRight, color: '#00ffff', intensity: 3.8 });
-          }
-          break;
-
-        case 5: // ZONE 5: WATERFALL VALLEY (u: 0.5 - 0.6)
-          // River rocks and mossy stone hazards
-          if (!isInsideRestricted && random() < 0.6) {
-            const side = random() > 0.5 ? 1 : -1;
-            const stoneDist = roadWidth / 2 + 1.5 + random() * 32;
-            const rPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * stoneDist);
-            rPos.y = getTerrainHeight(rPos.x, rPos.z, this) - 0.5;
-
-            this.rocks.push({
-              position: rPos,
-              scale: new THREE.Vector3(4 + random() * 5, 2 + random() * 4, 4 + random() * 5),
-              rotation: new THREE.Euler(random() * 0.3, random() * Math.PI, 0)
-            });
-          }
-          break;
-
-        case 6: // ZONE 6: HAIRPIN ROADS (u: 0.6 - 0.7)
-          // Intense warnings and guard cliffs
-          if (rType === 'hairpin' && random() < 0.72) {
-            const side = (pt.x > 0) ? -1 : 1; 
-            const rPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * (roadWidth / 2 + 10.0 + random() * 15));
-            rPos.y = getTerrainHeight(rPos.x, rPos.z, this) - 2.0;
-            
-            this.rocks.push({
-              position: rPos,
-              scale: new THREE.Vector3(7 + random() * 9, 14 + random() * 22, 7 + random() * 9),
-              rotation: new THREE.Euler(0, random() * Math.PI, random() * 0.08)
-            });
-          }
-          break;
-
-        case 7: // ZONE 7: DRAGON TEMPLE (u: 0.7 - 0.8)
-          // Beautiful Cherry Blossom Trees (Sakura) & Lanterns
-          if (random() < 0.65) {
-            const side = random() > 0.5 ? 1 : -1;
-            const treeDist = roadWidth / 2 + 5.5 + random() * 28;
-            const tPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * treeDist);
-            tPos.y = getTerrainHeight(tPos.x, tPos.z, this);
-            this.trees.push({
-              position: tPos,
-              scale: 0.85 + random() * 1.5,
-              type: 3 // Crimson Sakura Pink blossom trees!
-            });
-          }
-          if (j % 16 === 0) {
-            const side = random() > 0.5 ? 1 : -1;
-            const lPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * (roadWidth / 2 + 1.8));
-            lPos.y = getTerrainHeight(lPos.x, lPos.z, this) + 1.5;
-            this.lights.push({ position: lPos, color: '#ffd600', intensity: 2.8 });
-          }
-          break;
-
-        case 8: // ZONE 8: LONG HIGHWAY (u: 0.8 - 0.9)
-          // Huge billboards
-          if (j % 28 === 0) {
-            const side = (j % 56 === 0) ? 1 : -1;
-            const billPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * (roadWidth / 2 + 11.5));
+        case 4: // ZONE 4: MEADOWS AND WINDMILL FIELDS (u: 0.4 - 0.5)
+          // Rural windmills billboard markers
+          if (j % 55 === 0) {
+            const side = (j % 110 === 0) ? 1 : -1;
+            const billPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * (roadWidth / 2 + 12));
             billPos.y = getTerrainHeight(billPos.x, billPos.z, this);
-
-            const boardTitle = (j % 112 === 0) ? 'ZONE: 120 KMH' : ((j % 112 === 28) ? 'DRAGON MOUNTAIN PASS' : 'PBR ULTRA DRIVE');
             this.billboards.push({
               position: billPos,
               rotation: headingAngle + (side * Math.PI / 2),
-              text: boardTitle
+              text: 'WINDMILL VIEWPOINT'
             });
           }
           break;
 
-        case 9: // ZONE 9: FINISH AREA (u: 0.9 - 1.0)
-          // Stadium Grandstands
-          if (j % 24 === 0) {
-            const side = (j % 48 === 0) ? 1 : -1;
-            const standPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * (roadWidth / 2 + 14.5));
-            standPos.y = getTerrainHeight(standPos.x, standPos.z, this) - 0.2;
+        case 5: // ZONE 5: BROOKSIDE VALLEYS (u: 0.5 - 0.6)
+          if (!isInsideRestricted && random() < 0.4) {
+            const side = random() > 0.5 ? 1 : -1;
+            const stoneDist = roadWidth / 2 + 2.0 + random() * 20;
+            const rPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * stoneDist);
+            rPos.y = getTerrainHeight(rPos.x, rPos.z, this) - 0.2;
+
+            this.rocks.push({
+              position: rPos,
+              scale: new THREE.Vector3(3 + random() * 3, 2 + random() * 2, 3 + random() * 3),
+              rotation: new THREE.Euler(random() * 0.2, random() * Math.PI, 0)
+            });
+          }
+          break;
+
+        case 6: // ZONE 6: FARM BARNYARDS & SILOS (u: 0.6 - 0.7)
+          if (j % 50 === 0) {
+            const side = (j % 100 === 0) ? 1 : -1;
+            const billPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * (roadWidth / 2 + 10));
+            billPos.y = getTerrainHeight(billPos.x, billPos.z, this);
+            this.billboards.push({
+              position: billPos,
+              rotation: headingAngle + (side * Math.PI / 2),
+              text: 'RURAL HARVESTS'
+            });
+          }
+          break;
+
+        case 7: // ZONE 7: COWS & PASTORAL S-BENDS (u: 0.7 - 0.8)
+          if (j % 30 === 0) {
+            const lPos = new THREE.Vector3().copy(pt).addScaledVector(normal, (j % 60 === 0 ? 1 : -1) * (roadWidth / 2 + 1.8));
+            lPos.y = getTerrainHeight(lPos.x, lPos.z, this) + 1.5;
+            this.lights.push({ position: lPos, color: '#ffd600', intensity: 2.2 });
+          }
+          break;
+
+        case 8: // ZONE 8: RURAL HIGHWAY CORRIDOR (u: 0.8 - 0.9)
+          if (j % 30 === 0) {
+            const side = (j % 60 === 0) ? -1 : 1;
+            const billPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * (roadWidth / 2 + 10));
+            billPos.y = getTerrainHeight(billPos.x, billPos.z, this);
+
+            this.billboards.push({
+              position: billPos,
+              rotation: headingAngle + (side * Math.PI / 2),
+              text: 'SPEED LIMIT: 80'
+            });
+          }
+          break;
+
+        case 9: // ZONE 9: SPECTATOR RESORT & HOTELS (u: 0.9 - 1.0)
+          if (j % 35 === 0) {
+            const side = (j % 70 === 0) ? 1 : -1;
+            const standPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * (roadWidth / 2 + 12));
+            standPos.y = getTerrainHeight(standPos.x, standPos.z, this) - 0.1;
             this.grandstands.push({
               position: standPos,
-              scale: new THREE.Vector3(12, 6, 24),
+              scale: new THREE.Vector3(10, 5, 20),
               rotation: headingAngle + (side * Math.PI / 2)
             });
           }
-          if (j % 16 === 0) {
-            const flagPos = new THREE.Vector3().copy(pt).addScaledVector(normal, (j % 32 === 0 ? 1 : -1) * (roadWidth / 2 + 1.6));
-            flagPos.y = getTerrainHeight(flagPos.x, flagPos.z, this) + 4.8;
-            this.lights.push({ position: flagPos, color: '#ffffff', intensity: 2.2 });
+          if (j % 20 === 0) {
+            const flagPos = new THREE.Vector3().copy(pt).addScaledVector(normal, (j % 40 === 0 ? 1 : -1) * (roadWidth / 2 + 1.5));
+            flagPos.y = getTerrainHeight(flagPos.x, flagPos.z, this) + 4.5;
+            this.lights.push({ position: flagPos, color: '#ffffff', intensity: 2.0 });
           }
           break;
 

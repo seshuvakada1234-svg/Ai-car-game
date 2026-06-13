@@ -11,7 +11,7 @@ import { GameCanvas } from './components/GameCanvas';
 import { HUD } from './components/HUD';
 import { Menu } from './components/Menu';
 import { GameOver } from './components/GameOver';
-import { Trophy, Compass, Sparkles, Volume2, VolumeX, AlertCircle } from 'lucide-react';
+import { Trophy, Compass, Sparkles, Volume2, VolumeX, AlertCircle, Sun, Cloud, CloudRain, CloudFog, Moon } from 'lucide-react';
 import { selectRandomPlayerCar, setPlayerSelectedModelKey } from './world/procedural';
 
 export default function App() {
@@ -20,6 +20,10 @@ export default function App() {
   const [settings, setSettings] = useState<GameSettings | null>(null);
   const [isPaused, setIsPaused] = useState(false);
   const [elapsedTime, setElapsedTime] = useState(0);
+
+  // Dynamic Environment Settings
+  const [timeOfDay, setTimeOfDay] = useState<'morning' | 'noon' | 'sunset' | 'night'>('sunset');
+  const [weather, setWeather] = useState<'sunny' | 'cloudy' | 'foggy' | 'rain'>('sunny');
 
   // Synchronous car entities list
   const [cars, setCars] = useState<CarState[]>([]);
@@ -249,6 +253,51 @@ export default function App() {
         <span className="font-sans font-black text-[10px] tracking-wider uppercase">AI RACE ARENA <span className="text-[#00f2ffa5]">LIVE</span></span>
       </div>
 
+      {/* ================= ENVIRONMENT CONTROLLER PANEL ================= */}
+      {phase !== 'completed' && (
+        <div className="absolute top-4 right-4 z-30 flex flex-col items-end space-y-1.5 select-none scale-90 origin-top-right md:scale-100">
+          <div className="bg-slate-950/75 border border-slate-800/60 backdrop-blur-md p-1.5 px-2.5 rounded-2xl flex items-center space-x-4 text-white shadow-2xl">
+            
+            {/* Time Selector */}
+            <div className="flex items-center space-x-1 bg-slate-900/40 p-0.5 rounded-xl border border-slate-800/30">
+              <span className="text-[7.5px] font-black tracking-widest uppercase text-slate-400 px-1.5">TIME</span>
+              {(['morning', 'noon', 'sunset', 'night'] as const).map(t => (
+                <button
+                  key={t}
+                  onClick={() => setTimeOfDay(t)}
+                  className={`px-2 py-0.5 rounded-lg text-[8.5px] font-black uppercase tracking-wider transition-all border ${
+                    timeOfDay === t
+                      ? 'bg-sky-500/20 border-sky-500/60 text-sky-300 shadow-[0_0_8px_rgba(56,189,248,0.2)]'
+                      : 'border-transparent text-slate-400 hover:text-white hover:bg-slate-800/20'
+                  }`}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+
+            {/* Weather Selector */}
+            <div className="flex items-center space-x-1 bg-slate-900/40 p-0.5 rounded-xl border border-slate-800/30">
+              <span className="text-[7.5px] font-black tracking-widest uppercase text-emerald-400 px-1.5">WEATHER</span>
+              {(['sunny', 'cloudy', 'foggy', 'rain'] as const).map(w => (
+                <button
+                  key={w}
+                  onClick={() => setWeather(w)}
+                  className={`px-2 py-0.5 rounded-lg text-[8.5px] font-black uppercase tracking-wider transition-all border ${
+                    weather === w
+                      ? 'bg-emerald-500/20 border-emerald-500/60 text-emerald-300 shadow-[0_0_8px_rgba(52,211,153,0.2)]'
+                      : 'border-transparent text-slate-400 hover:text-white hover:bg-slate-800/20'
+                  }`}
+                >
+                  {w}
+                </button>
+              ))}
+            </div>
+
+          </div>
+        </div>
+      )}
+
       {/* ================= RENDER INTERACTIVE THREE CANVAS ================= */}
       {trackHelperRef.current && physicsServiceRef.current && cars.length > 0 && (
         <GameCanvas
@@ -261,6 +310,8 @@ export default function App() {
           onFinishRace={() => setPhase('completed')}
           onTick={handleTickUpdate}
           soundEnabled={soundEnabled}
+          timeOfDay={timeOfDay}
+          weather={weather}
         />
       )}
 

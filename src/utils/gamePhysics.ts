@@ -6,6 +6,8 @@
 import * as THREE from 'three';
 import { CarState, ControlsState, Checkpoint, Vector3D, Difficulty } from '../types';
 import { TrackGeometryHelper } from './track';
+import { SpatialGrid } from './spatialGrid';
+import { particleSystem } from '../world/particleSystem';
 
 // Arcade-optimized physics parameters matching Asphalt 8 or CarX Drift Racing styles
 const MAX_SPEED = 78; // units/sec (~280 km/h)
@@ -35,7 +37,6 @@ export interface ParticleEffect {
 
 export class GamePhysicsService {
   trackHelper: TrackGeometryHelper;
-  particles: ParticleEffect[] = [];
   sparkCounter = 0;
 
   // Track progress history for exact lap counting without checkpoints skip
@@ -49,25 +50,7 @@ export class GamePhysicsService {
 
   constructor(trackHelper: TrackGeometryHelper) {
     this.trackHelper = trackHelper;
-
-    // Instantiate particle object pool (600 preallocated elements to achieve 120 FPS)
-    for (let i = 0; i < 600; i++) {
-      this.particles.push({
-        active: false,
-        position: new THREE.Vector3(),
-        velocity: new THREE.Vector3(),
-        color: '#ffffff',
-        size: 0.5,
-        life: 0,
-        decay: 1.0,
-        isNitro: false,
-        isSpark: false,
-      });
-    }
   }
-
-  // Ring buffer index for allocating pooled particles in O(1)
-  private poolIndex = 0;
 
   spawnParticle(
     x: number, y: number, z: number,
@@ -75,18 +58,16 @@ export class GamePhysicsService {
     color: string, size: number, decay: number,
     isNitro = false, isSpark = false
   ) {
-    const p = this.particles[this.poolIndex];
-    p.active = true;
-    p.position.set(x, y, z);
-    p.velocity.set(vx, vy, vz);
-    p.color = color;
-    p.size = size;
-    p.life = 1.0;
-    p.decay = decay;
-    p.isNitro = isNitro;
-    p.isSpark = isSpark;
+    let type: 'nitro' | 'exhaust' | 'smoke' | 'spark' | 'dust' = 'exhaust';
+    if (isNitro) {
+      type = 'nitro';
+    } else if (isSpark) {
+      type = 'spark';
+    } else if (color === '#e2e6eb' || color === 'rgba(255,255,255,0.7)') {
+      type = 'smoke';
+    }
     
-    this.poolIndex = (this.poolIndex + 1) % this.particles.length;
+    particleSystem.spawn(type, x, y, z, vx, vy, vz, color, size, decay);
   }
 
   // Create starting lineup arrangement with realistic spacing
@@ -412,7 +393,7 @@ export class GamePhysicsService {
 
     // Keep car securely on track (terrain clamping + bridge transitions)
     const pos3 = GamePhysicsService._vecA.set(car.position.x, car.position.y, car.position.z);
-    const trackInfo = this.trackHelper.getNearestTrackInfo(pos3);
+    const trackInfo = this.trackHelper.getNearestTrackInfo(pos3, car.id);
 
     // Exact spline altitude mapping
     const roadHeight = trackInfo.nearestPoint.y;
@@ -585,30 +566,7 @@ export class GamePhysicsService {
 
   // Update physical positions of sparks / smoke with air friction and gravity
   updateParticles(dt: number) {
-    for (let i = 0; i < this.particles.length; i++) {
-      const p = this.particles[i];
-      if (!p.active) continue;
-
-      p.life -= p.decay * dt;
-      if (p.life <= 0) {
-        p.active = false;
-        continue;
-      }
-
-      // apply air drag dampening
-      p.velocity.x *= 0.95;
-      p.velocity.y *= 0.95;
-      p.velocity.z *= 0.95;
-
-      p.position.x += p.velocity.x * dt;
-      p.position.y += p.velocity.y * dt;
-      p.position.z += p.velocity.z * dt;
-
-      // apply falling friction gravity to spark metal embers
-      if (p.isSpark) {
-        p.velocity.y -= 11.2 * dt;
-      }
-    }
+    particleSystem.update(dt);
   }
 
   // Bulletproof Continuous progress checkpoint and lap tracking
@@ -674,12 +632,30 @@ export class GamePhysicsService {
     const collisionRadius = 3.6; // bumper bounds overlap padding
     const radiusSq = collisionRadius * collisionRadius;
 
+    // 1. Build spatial hash grid
+    const grid = new SpatialGrid(22); // cell size 22m (around 6x car length)
+    for (let i = 0; i < size; i++) {
+      const a = cars[i];
+      if (a && a.position && !a.isFinished) {
+        grid.insert(a);
+      }
+    }
+
+    // Track resolved pairs to avoid double-processing
+    const resolvedPairs = new Set<string>();
+
     for (let i = 0; i < size; i++) {
       const a = cars[i];
       if (!a || !a.position || !a.velocity || a.isFinished) continue;
-      for (let j = i + 1; j < size; j++) {
-        const b = cars[j];
+
+      const nearby = grid.getNearby(a);
+      for (const b of nearby) {
         if (!b || !b.position || !b.velocity || b.isFinished) continue;
+
+        // Order IDs consistently to prevent duplicate pair processing
+        const pairId = a.id < b.id ? `${a.id}:${b.id}` : `${b.id}:${a.id}`;
+        if (resolvedPairs.has(pairId)) continue;
+        resolvedPairs.add(pairId);
 
         const dx = b.position.x - a.position.x;
         const dz = b.position.z - a.position.z;
@@ -740,7 +716,7 @@ export class GamePhysicsService {
   // Advanced AI Autopilot Logic (Overtaking, Racing Apex Line, Rubber-banding, Collision Dodge)
   updateAICar(car: CarState, dt: number, otherCars: CarState[]) {
     const pos3 = GamePhysicsService._vecA.set(car.position.x, car.position.y, car.position.z);
-    const trackInfo = this.trackHelper.getNearestTrackInfo(pos3);
+    const trackInfo = this.trackHelper.getNearestTrackInfo(pos3, car.id);
 
     // 1. Dynamic Lookahead Distance (Linked to speed: small on hairpins, far on straights)
     const speedKmh = Math.abs(car.speed) * 3.6;
