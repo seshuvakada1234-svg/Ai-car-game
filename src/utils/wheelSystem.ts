@@ -5,6 +5,7 @@ import { SuspensionState } from './suspension';
 export interface WheelAssembly {
   node: THREE.Object3D;
   initialLocalPos: THREE.Vector3;
+  initialRotation: THREE.Euler;
   wheelspinAngle: number;
 }
 
@@ -14,68 +15,158 @@ export class WheelSystem {
   public rearLeftWheel: WheelAssembly | null = null;
   public rearRightWheel: WheelAssembly | null = null;
 
-  // Track width / wheelbase constants (taken from real GT3 and Aventador spec ratios)
-  private static readonly REFL_TRACK_WIDTH = 1.95; // meters
-  private static readonly REFL_WHEEL_BASE = 2.70;  // meters
+  // Fallback wheel positions for models without proper naming
+  private static readonly FALLBACK_POSITIONS = {
+    frontLeft: new THREE.Vector3(0.95, 0.38, 1.15),
+    frontRight: new THREE.Vector3(-0.95, 0.38, 1.15),
+    rearLeft: new THREE.Vector3(1.0, 0.38, -1.2),
+    rearRight: new THREE.Vector3(-1.0, 0.38, -1.2)
+  };
+
+  // Wheel radius for spin calculations
+  private static readonly WHEEL_RADIUS = 0.38;
+
+  // Suspension constants
+  private static readonly MAX_TRAVEL = 0.15;
+  private static readonly WHEEL_TRAVEL_Y = 0.10;
 
   constructor(wheels: THREE.Object3D[]) {
     this.detectAndAssignWheels(wheels);
   }
 
   /**
-   * Automatically detect and classify each 3D wheel model node based on its spatial quadrant position
+   * Detects wheel meshes by name matching and classifies by Z-coordinate sorting
+   * 
+   * Detection pattern: names containing:
+   * - wheel, tire, rim, pneu, col_w (case-insensitive)
+   * 
+   * Classification:
+   * 1. Collect all matching wheels
+   * 2. Sort by Z coordinate (higher Z = front)
+   * 3. Split into front and rear pairs
+   * 4. Sort each pair by X coordinate
+   * 5. Assign: frontLeft, frontRight, rearLeft, rearRight
+   * 6. Store initial rotation to preserve GLTF orientation
    */
   private detectAndAssignWheels(wheels: THREE.Object3D[]): void {
-    if (!wheels || wheels.length === 0) return;
+    if (!wheels || wheels.length === 0) {
+      this.assignFallbackWheels();
+      return;
+    }
+
+    // Collect wheels that match name patterns
+    const detectedWheels: THREE.Object3D[] = [];
+    const wheelPatterns = ['wheel', 'tire', 'rim', 'pneu', 'col_w'];
 
     wheels.forEach((node) => {
-      // Find local coordinates relative to the direct parent frame (the car body)
-      const localPos = node.position.clone();
-
-      // Front vs Rear (Z in standard hypercar GLTFs is forward-facing or backwards depending on the model scale)
-      // Usually Z is forward, but we can check absolute boundaries
-      const isFront = localPos.z > 0.15;
-      const isLeft = localPos.x > 0;
-
-      const assembly: WheelAssembly = {
-        node,
-        initialLocalPos: localPos.clone(),
-        wheelspinAngle: 0
-      };
-
-      if (isFront) {
-        if (isLeft) {
-          this.frontLeftWheel = assembly;
-        } else {
-          this.frontRightWheel = assembly;
-        }
-      } else {
-        if (isLeft) {
-          this.rearLeftWheel = assembly;
-        } else {
-          this.rearRightWheel = assembly;
-        }
+      const nameLower = node.name.toLowerCase();
+      const isWheelMatch = wheelPatterns.some(pattern => nameLower.includes(pattern));
+      
+      if (isWheelMatch) {
+        detectedWheels.push(node);
       }
     });
 
-    // Fallbacks if some quadrants are shared or empty (make sure all properties are stable)
-    if (!this.frontLeftWheel && wheels[0]) {
-      this.frontLeftWheel = { node: wheels[0], initialLocalPos: wheels[0].position.clone(), wheelspinAngle: 0 };
+    if (detectedWheels.length === 0) {
+      this.assignFallbackWheels();
+      return;
     }
-    if (!this.frontRightWheel && wheels[1] || (!this.frontRightWheel && wheels[0])) {
-      this.frontRightWheel = { node: wheels[1] || wheels[0], initialLocalPos: (wheels[1] || wheels[0]).position.clone(), wheelspinAngle: 0 };
+
+    // Sort wheels by Z coordinate (higher Z = front wheels)
+    detectedWheels.sort((a, b) => (b.position.z || 0) - (a.position.z || 0));
+
+    // Split into front and rear pairs
+    const frontWheels = detectedWheels.slice(0, 2);
+    const rearWheels = detectedWheels.slice(2, 4);
+
+    // Process front wheels - sort by X (positive X = left in local space)
+    if (frontWheels.length >= 2) {
+      frontWheels.sort((a, b) => (b.position.x || 0) - (a.position.x || 0));
+      this.frontLeftWheel = this.createWheelAssembly(frontWheels[0]);
+      this.frontRightWheel = this.createWheelAssembly(frontWheels[1]);
+    } else if (frontWheels.length === 1) {
+      this.frontLeftWheel = this.createWheelAssembly(frontWheels[0]);
     }
-    if (!this.rearLeftWheel && wheels[2] || (!this.rearLeftWheel && wheels[0])) {
-      this.rearLeftWheel = { node: wheels[2] || wheels[0], initialLocalPos: (wheels[2] || wheels[0]).position.clone(), wheelspinAngle: 0 };
+
+    // Process rear wheels - sort by X (positive X = left in local space)
+    if (rearWheels.length >= 2) {
+      rearWheels.sort((a, b) => (b.position.x || 0) - (a.position.x || 0));
+      this.rearLeftWheel = this.createWheelAssembly(rearWheels[0]);
+      this.rearRightWheel = this.createWheelAssembly(rearWheels[1]);
+    } else if (rearWheels.length === 1) {
+      this.rearLeftWheel = this.createWheelAssembly(rearWheels[0]);
     }
-    if (!this.rearRightWheel && wheels[3] || (!this.rearRightWheel && wheels[0])) {
-      this.rearRightWheel = { node: wheels[3] || wheels[0], initialLocalPos: (wheels[3] || wheels[0]).position.clone(), wheelspinAngle: 0 };
+
+    // Fill remaining slots with fallbacks
+    if (!this.frontLeftWheel) {
+      this.frontLeftWheel = this.createFallbackWheelAssembly(WheelSystem.FALLBACK_POSITIONS.frontLeft);
+    }
+    if (!this.frontRightWheel) {
+      this.frontRightWheel = this.createFallbackWheelAssembly(WheelSystem.FALLBACK_POSITIONS.frontRight);
+    }
+    if (!this.rearLeftWheel) {
+      this.rearLeftWheel = this.createFallbackWheelAssembly(WheelSystem.FALLBACK_POSITIONS.rearLeft);
+    }
+    if (!this.rearRightWheel) {
+      this.rearRightWheel = this.createFallbackWheelAssembly(WheelSystem.FALLBACK_POSITIONS.rearRight);
     }
   }
 
   /**
-   * Updates wheel yaw steering, pitch rolling rotation and suspension vertical travel offset.
-   * Keeps track width consistent to prevent wheels from ever looking detached or floating.
+   * Creates a wheel assembly from a detected wheel node
+   * Stores initial rotation to preserve GLTF orientation
+   */
+  private createWheelAssembly(node: THREE.Object3D): WheelAssembly {
+    return {
+      node,
+      initialLocalPos: node.position.clone(),
+      initialRotation: node.rotation.clone(),
+      wheelspinAngle: 0
+    };
+  }
+
+  /**
+   * Assigns fallback wheel positions when detection fails
+   */
+  private assignFallbackWheels(): void {
+    this.frontLeftWheel = this.createFallbackWheelAssembly(WheelSystem.FALLBACK_POSITIONS.frontLeft);
+    this.frontRightWheel = this.createFallbackWheelAssembly(WheelSystem.FALLBACK_POSITIONS.frontRight);
+    this.rearLeftWheel = this.createFallbackWheelAssembly(WheelSystem.FALLBACK_POSITIONS.rearLeft);
+    this.rearRightWheel = this.createFallbackWheelAssembly(WheelSystem.FALLBACK_POSITIONS.rearRight);
+  }
+
+  /**
+   * Creates a fallback wheel assembly with a dummy node
+   */
+  private createFallbackWheelAssembly(position: THREE.Vector3): WheelAssembly {
+    const dummyGroup = new THREE.Group();
+    dummyGroup.position.copy(position);
+    return {
+      node: dummyGroup,
+      initialLocalPos: position.clone(),
+      initialRotation: new THREE.Euler(),
+      wheelspinAngle: 0
+    };
+  }
+
+  /**
+   * EXCLUSIVE wheel control: spin, steering, and suspension travel.
+   * 
+   * Only this system updates wheel transforms.
+   * No other system (suspension.ts, gamePhysics.ts, GameCanvas.tsx) should modify wheels.
+   * 
+   * Uses spring-damper suspension with:
+   * - MAX_TRAVEL = 0.15m
+   * - wheelTravelY = 0.10m
+   * - No teleporting or floating
+   * 
+   * CRITICAL RULES:
+   * 1. Preserve original wheel axis orientation from GLTF
+   * 2. Apply rotations additively (rotateX, rotateY) - never overwrite
+   * 3. Lock X and Z positions to initial values
+   * 4. Smooth Y-axis suspension with clamped lerp
+   * 5. Front wheels only steer (rotateY)
+   * 6. Rear wheels never steer
    */
   public update(
     car: CarState,
@@ -84,58 +175,114 @@ export class WheelSystem {
     elapsedSec: number
   ): void {
     const speed = car.speed;
-    const wheelRadius = 0.38; // standard physical wheel radius
 
-    // 1. Calculate wheelspin pitch angle change
-    // wheel_rotation_speed = velocity / radius (dt * speed / radius)
-    let spinDelta = (speed * elapsedSec) / wheelRadius;
+    // 1. Calculate wheel spin angle change
+    // wheel_rotation_speed = velocity / radius = (dt * speed / radius)
+    let spinDelta = (speed * elapsedSec) / WheelSystem.WHEEL_RADIUS;
     
-    // Simulate initial burnout tire spin during hard accelerate launch!
+    // Simulate burnout wheelspin during hard acceleration launch
     const isAcceleratingHard = car.id === 'player' && car.speed < 15 && Math.abs(steerValue) < 0.1;
     if (isAcceleratingHard && speed > 1) {
-      spinDelta = (35 * elapsedSec) / wheelRadius; // locked in burnout spin speed!
+      spinDelta = (35 * elapsedSec) / WheelSystem.WHEEL_RADIUS;
     }
 
-    // 2. Front wheel steer yaw angle limits
+    // 2. Front wheel steering angle
     const maxSteerAngle = 0.42; // ~24 degrees of real front wheel lock
     const steerAngle = steerValue * maxSteerAngle;
 
-    // 3. Apply changes to each wheel assembly securely
-    const updateAssembly = (assembly: WheelAssembly | null, compression: number, steer: number) => {
-      if (!assembly || !assembly.node) return;
+    // 3. Maximum suspension travel - clamped lerp factor to prevent teleporting
+    const suspensionLerpAlpha = Math.min(1.0, elapsedSec * 10.0);
 
-      // Update stable wheel spin accumulator
-      assembly.wheelspinAngle += spinDelta;
-      
-      // Keep wheel rotation between 0 and 2*PI for precision
-      if (assembly.wheelspinAngle > Math.PI * 2) assembly.wheelspinAngle -= Math.PI * 2;
-      if (assembly.wheelspinAngle < 0) assembly.wheelspinAngle += Math.PI * 2;
+    // 4. Update each wheel assembly - EXCLUSIVELY
+    // Front wheels can steer
+    this.updateWheelAssembly(
+      this.frontLeftWheel,
+      suspension.frontLeft,
+      steerAngle,
+      spinDelta,
+      suspensionLerpAlpha,
+      true  // canSteer
+    );
+    this.updateWheelAssembly(
+      this.frontRightWheel,
+      suspension.frontRight,
+      steerAngle,
+      spinDelta,
+      suspensionLerpAlpha,
+      true  // canSteer
+    );
 
-      // Setup clean and stable rotation transitions
-      assembly.node.rotation.set(0, 0, 0); // Reset rotation to default base alignment
+    // Rear wheels never steer
+    this.updateWheelAssembly(
+      this.rearLeftWheel,
+      suspension.rearLeft,
+      0,
+      spinDelta,
+      suspensionLerpAlpha,
+      false  // canSteer
+    );
+    this.updateWheelAssembly(
+      this.rearRightWheel,
+      suspension.rearRight,
+      0,
+      spinDelta,
+      suspensionLerpAlpha,
+      false  // canSteer
+    );
+  }
 
-      // Yaw rotation (steer on front wheels)
-      assembly.node.rotateY(steer);
+  /**
+   * Updates a single wheel assembly with spin, steering, and suspension travel
+   * 
+   * CRITICAL: Preserve original rotation orientation from GLTF
+   * CRITICAL: Apply rotations additively using rotateX/rotateY
+   * CRITICAL: Lock X,Z to initial positions - only modify Y for suspension
+   * CRITICAL: Use clamped lerp for suspension to prevent teleporting
+   */
+  private updateWheelAssembly(
+    assembly: WheelAssembly | null,
+    compression: number,
+    steerAngle: number,
+    spinDelta: number,
+    suspensionLerpAlpha: number,
+    canSteer: boolean
+  ): void {
+    if (!assembly || !assembly.node) return;
 
-      // Pitch rotation (spin on rolling axel)
-      assembly.node.rotateX(assembly.wheelspinAngle);
+    // 1. Update wheel spin accumulator
+    assembly.wheelspinAngle += spinDelta;
+    
+    // Keep wheel rotation normalized to prevent numerical errors
+    while (assembly.wheelspinAngle > Math.PI * 2) assembly.wheelspinAngle -= Math.PI * 2;
+    while (assembly.wheelspinAngle < 0) assembly.wheelspinAngle += Math.PI * 2;
 
-      // Apply vertical suspension travel relative to rest height
-      // The tire moves upward in the wheel well by (compression * dynamic dampening height)
-      const maxTravelY = 0.10; // meters of maximum wheel travel
-      const targetDisplacementY = assembly.initialLocalPos.y + (compression * maxTravelY);
-      
-      assembly.node.position.y = THREE.MathUtils.lerp(assembly.node.position.y, targetDisplacementY, 15 * elapsedSec);
+    // 2. Restore initial orientation from GLTF to preserve axis alignment
+    assembly.node.rotation.copy(assembly.initialRotation);
 
-      // Lock X and Z coordinates to initial values to preserve track width and wheelbase perfectly!
-      assembly.node.position.x = assembly.initialLocalPos.x;
-      assembly.node.position.z = assembly.initialLocalPos.z;
-    };
+    // 3. Apply rotations additively (never overwrite)
+    // Spin around X-axis (pitch - actual wheel rotation)
+    assembly.node.rotateX(assembly.wheelspinAngle);
+    
+    // Steering around Y-axis (yaw - only for front wheels)
+    if (canSteer) {
+      assembly.node.rotateY(steerAngle);
+    }
 
-    // Apply updates
-    updateAssembly(this.frontLeftWheel, suspension.frontLeft, steerAngle);
-    updateAssembly(this.frontRightWheel, suspension.frontRight, steerAngle);
-    updateAssembly(this.rearLeftWheel, suspension.rearLeft, 0); // standard rear wheel alignment
-    updateAssembly(this.rearRightWheel, suspension.rearRight, 0);
+    // 4. Apply vertical suspension travel with clamped lerp
+    // Clamp compression to [0, 1]
+    const clampedCompression = Math.max(0, Math.min(1, compression));
+    const targetDisplacementY = assembly.initialLocalPos.y + (clampedCompression * WheelSystem.WHEEL_TRAVEL_Y);
+    
+    // Smooth suspension movement with clamped alpha to prevent teleporting
+    assembly.node.position.y = THREE.MathUtils.lerp(
+      assembly.node.position.y,
+      targetDisplacementY,
+      suspensionLerpAlpha
+    );
+
+    // 5. Lock X and Z coordinates to initial values
+    // This prevents wheel drifting and ensures consistent track width and wheelbase
+    assembly.node.position.x = assembly.initialLocalPos.x;
+    assembly.node.position.z = assembly.initialLocalPos.z;
   }
 }
