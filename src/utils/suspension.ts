@@ -15,7 +15,7 @@ export class SuspensionSystem {
   private static readonly SPRING_STIFFNESS = 35.0; // Spring stiffness coefficient
   private static readonly DAMPING_COEFFICIENT = 4.5; // Damping rate (critical damping)
   private static readonly ANTI_ROLL_BAR_FORCE = 12.0; // Stabilizing anti-roll stiffness
-  private static readonly MAX_TRAVEL = 0.45; // Maximum travel in meters
+  private static readonly MAX_TRAVEL = 0.15; // Maximum travel in meters
   private static readonly HIGH_SPEED_DOWNFORCE = 0.08; // Downforce factor
 
   /**

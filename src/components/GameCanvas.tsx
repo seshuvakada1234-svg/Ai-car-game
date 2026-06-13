@@ -719,30 +719,89 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
               8 * elapsedSec
             );
 
-            // Wheel Spin:
-            // All wheels rotate: wheel.rotation.x += rotDelta;
+            // Retrieve dynamic suspension state for the four wheels
+            const sState = SuspensionSystem.calculateSuspension(
+              c,
+              elapsedSec,
+              {
+                forward: c.id === 'player' ? controlsRef.current.forward : (c.speed > 0),
+                backward: c.id === 'player' ? controlsRef.current.backward : (c.speed < 0),
+                left: c.id === 'player' ? controlsRef.current.left : (steerOffset > 0.05),
+                right: c.id === 'player' ? controlsRef.current.right : (steerOffset < -0.05),
+                handbrake: c.id === 'player' ? !!controlsRef.current.handbrake : false
+              },
+              steerOffset,
+              0,
+              carGroup.rotation.z,
+              carGroup.rotation.x
+            );
+
+            // Wheel Spin using accumulated angle tracking to prevent drifts/gimbal errors
             if (wheels) {
-              if (wheels.frontLeft) wheels.frontLeft.rotation.x += rotDelta;
-              if (wheels.frontRight) wheels.frontRight.rotation.x += rotDelta;
-              if (wheels.rearLeft) wheels.rearLeft.rotation.x += rotDelta;
-              if (wheels.rearRight) wheels.rearRight.rotation.x += rotDelta;
+              if (wheels.wheelspinAngle === undefined) {
+                wheels.wheelspinAngle = 0;
+              }
+              // Accumulate spin delta based on actual speed
+              wheels.wheelspinAngle += rotDelta;
+              // Keep angle normalized within [0, 2PI]
+              wheels.wheelspinAngle %= Math.PI * 2;
+
+              if (wheels.frontLeft) wheels.frontLeft.rotation.x = wheels.wheelspinAngle;
+              if (wheels.frontRight) wheels.frontRight.rotation.x = wheels.wheelspinAngle;
+              if (wheels.rearLeft) wheels.rearLeft.rotation.x = wheels.wheelspinAngle;
+              if (wheels.rearRight) wheels.rearRight.rotation.x = wheels.wheelspinAngle;
             }
 
-            // Steering pivots update:
+            // Steering pivots update + lock suspension spatial coordinate offsets
+            const maxTravelY = 0.10; // meters of maximum wheel travel
+
             if (gltfPivots) {
-              if (gltfPivots.frontLeftPivot) {
+              // Front Left Pivot: Steer and Suspension Y Offset
+              if (gltfPivots.frontLeftPivot && wheels && wheels.flInitialPos) {
                 gltfPivots.frontLeftPivot.rotation.y = THREE.MathUtils.lerp(
                   gltfPivots.frontLeftPivot.rotation.y,
                   steerOffset,
                   0.18
                 );
+                const comp = sState ? sState.frontLeft : 0;
+                const targetY = wheels.flInitialPos.y + (comp * maxTravelY);
+                // Smoothly slide Y and rigidly lock X and Z coordinates
+                gltfPivots.frontLeftPivot.position.y = THREE.MathUtils.lerp(gltfPivots.frontLeftPivot.position.y, targetY, 15 * elapsedSec);
+                gltfPivots.frontLeftPivot.position.x = wheels.flInitialPos.x;
+                gltfPivots.frontLeftPivot.position.z = wheels.flInitialPos.z;
               }
-              if (gltfPivots.frontRightPivot) {
+
+              // Front Right Pivot: Steer and Suspension Y Offset
+              if (gltfPivots.frontRightPivot && wheels && wheels.frInitialPos) {
                 gltfPivots.frontRightPivot.rotation.y = THREE.MathUtils.lerp(
                   gltfPivots.frontRightPivot.rotation.y,
                   steerOffset,
                   0.18
                 );
+                const comp = sState ? sState.frontRight : 0;
+                const targetY = wheels.frInitialPos.y + (comp * maxTravelY);
+                // Smoothly slide Y and rigidly lock X and Z coordinates
+                gltfPivots.frontRightPivot.position.y = THREE.MathUtils.lerp(gltfPivots.frontRightPivot.position.y, targetY, 15 * elapsedSec);
+                gltfPivots.frontRightPivot.position.x = wheels.frInitialPos.x;
+                gltfPivots.frontRightPivot.position.z = wheels.frInitialPos.z;
+              }
+            }
+
+            // Rear Wheels: Only dynamic vertical Y-displacement, X & Z rigidly locked
+            if (wheels) {
+              if (wheels.rearLeft && wheels.rlInitialPos) {
+                const comp = sState ? sState.rearLeft : 0;
+                const targetY = wheels.rlInitialPos.y + (comp * maxTravelY);
+                wheels.rearLeft.position.y = THREE.MathUtils.lerp(wheels.rearLeft.position.y, targetY, 15 * elapsedSec);
+                wheels.rearLeft.position.x = wheels.rlInitialPos.x;
+                wheels.rearLeft.position.z = wheels.rlInitialPos.z;
+              }
+              if (wheels.rearRight && wheels.rrInitialPos) {
+                const comp = sState ? sState.rearRight : 0;
+                const targetY = wheels.rrInitialPos.y + (comp * maxTravelY);
+                wheels.rearRight.position.y = THREE.MathUtils.lerp(wheels.rearRight.position.y, targetY, 15 * elapsedSec);
+                wheels.rearRight.position.x = wheels.rrInitialPos.x;
+                wheels.rearRight.position.z = wheels.rrInitialPos.z;
               }
             }
           } else {
@@ -856,11 +915,21 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                   }
                 });
 
+                const flInitialPos = frontLeft ? (frontLeft as THREE.Object3D).position.clone() : new THREE.Vector3();
+                const frInitialPos = frontRight ? (frontRight as THREE.Object3D).position.clone() : new THREE.Vector3();
+                const rlInitialPos = rearLeft ? (rearLeft as THREE.Object3D).position.clone() : new THREE.Vector3();
+                const rrInitialPos = rearRight ? (rearRight as THREE.Object3D).position.clone() : new THREE.Vector3();
+
                 carGroup.userData.wheels = {
                   frontLeft,
                   frontRight,
                   rearLeft,
-                  rearRight
+                  rearRight,
+                  flInitialPos,
+                  frInitialPos,
+                  rlInitialPos,
+                  rrInitialPos,
+                  wheelspinAngle: 0
                 };
 
                 // 4. Create steering pivots and attach front wheels safely

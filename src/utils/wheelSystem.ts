@@ -122,7 +122,7 @@ export class WheelSystem {
 
       // Apply vertical suspension travel relative to rest height
       // The tire moves upward in the wheel well by (compression * dynamic dampening height)
-      const maxTravelY = 0.22; // meters of maximum wheel travel
+      const maxTravelY = 0.10; // meters of maximum wheel travel
       const targetDisplacementY = assembly.initialLocalPos.y + (compression * maxTravelY);
       
       assembly.node.position.y = THREE.MathUtils.lerp(assembly.node.position.y, targetDisplacementY, 15 * elapsedSec);

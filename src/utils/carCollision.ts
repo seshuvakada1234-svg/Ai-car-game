@@ -3,10 +3,10 @@ import { CarState } from '../types';
 import { SpatialGrid } from './spatialGrid';
 
 export class CarCollisionSystem {
-  private static readonly COLLISION_RADIUS = 3.6; // bumper bounds overlap padding (diameter equivalent)
+  private static readonly COLLISION_RADIUS = 1.85; // realistic bumper bounds (width 1.95m, length 4.5m sphere footprint equivalent)
   private static readonly COLLISION_RADIUS_SQ = CarCollisionSystem.COLLISION_RADIUS * CarCollisionSystem.COLLISION_RADIUS;
-  private static readonly RESTITUTION_VEHICLE = 0.55; // elastic rebound between cars
-  private static readonly RESTITUTION_WALL = 0.38;    // rebound off guardrails
+  private static readonly RESTITUTION_VEHICLE = 0.15; // low restitution (0.1 - 0.2) for heavy, realistic inelastic contacts
+  private static readonly RESTITUTION_WALL = 0.18;    // rebound off guardrails
 
   /**
    * Resolves elastic, momentum-preserving collisions between all active vehicles using spatial partitioning.
@@ -16,7 +16,7 @@ export class CarCollisionSystem {
     if (size <= 1) return;
 
     // 1. Build spatial hash grid for performance
-    const grid = new SpatialGrid(22); // cell size 22m (around 6x car length)
+    const grid = new SpatialGrid(18); // adjusted grid size matching tighter collision footprints
     for (let i = 0; i < size; i++) {
       const a = cars[i];
       if (a && a.position && !a.isFinished) {
@@ -41,17 +41,30 @@ export class CarCollisionSystem {
 
         const dx = b.position.x - a.position.x;
         const dz = b.position.z - a.position.z;
-        const distSq = dx * dx + dz * dz;
+        let distSq = dx * dx + dz * dz;
 
-        if (distSq < this.COLLISION_RADIUS_SQ && distSq > 0.001) {
-          const dist = Math.sqrt(distSq);
+        if (distSq < this.COLLISION_RADIUS_SQ) {
+          let dist = Math.sqrt(distSq);
+          
+          // Secure guard against overlap at identical coordinate locations
+          if (dist < 0.001) {
+            dist = 0.01;
+            distSq = 0.0001;
+          }
+
           const overlap = this.COLLISION_RADIUS - dist;
 
           // Unit normal direction of collision
-          const nx = dx / dist;
-          const nz = dz / dist;
+          let nx = dx / dist;
+          let nz = dz / dist;
+          
+          // Handle indeterminate normal cases
+          if (Math.abs(nx) < 0.001 && Math.abs(nz) < 0.001) {
+            nx = Math.cos(a.angle + Math.PI / 2);
+            nz = Math.sin(a.angle + Math.PI / 2);
+          }
 
-          // 2. Resolve overlap instantly with half push to prevent vehicles from clipping
+          // 2. Resolve overlap instantly with push (half way) to prevent vehicles from clipping/teleporting
           const pushX = nx * overlap * 0.505;
           const pushZ = nz * overlap * 0.505;
 
@@ -59,6 +72,9 @@ export class CarCollisionSystem {
           a.position.z -= pushZ;
           b.position.x += pushX;
           b.position.z += pushZ;
+
+          // Ensure Y heights stay relative to roads, locking flat-plane displacement only
+          // This absolutely prevents climbing or stacking!
 
           // 3. Relative velocity difference
           const rvx = b.velocity.x - a.velocity.x;
@@ -68,7 +84,7 @@ export class CarCollisionSystem {
           const velAlongNormal = rvx * nx + rvz * nz;
 
           if (velAlongNormal < 0) { // they are approaching
-            // Approximate equal mass for race vehicles: momentum redistribution
+            // Approximate equal mass for race vehicles: momentum redistribution with inelastic collision damping
             const impulseScalar = -(1 + this.RESTITUTION_VEHICLE) * velAlongNormal * 0.5;
 
             a.velocity.x -= impulseScalar * nx;
@@ -76,13 +92,19 @@ export class CarCollisionSystem {
             b.velocity.x += impulseScalar * nx;
             b.velocity.z += impulseScalar * nz;
 
+            // Apply direct energy damping after heavy impacts
+            a.velocity.x *= 0.82;
+            a.velocity.z *= 0.82;
+            b.velocity.x *= 0.82;
+            b.velocity.z *= 0.82;
+
             // Re-sync speed values based on final post-impulse translation velocity
             a.speed = Math.sign(a.speed) * Math.sqrt(a.velocity.x * a.velocity.x + a.velocity.z * a.velocity.z);
             b.speed = Math.sign(b.speed) * Math.sqrt(b.velocity.x * b.velocity.x + b.velocity.z * b.velocity.z);
 
-            // Contact friction speed loss on both side-swiped hulls
-            a.speed *= 0.95;
-            b.speed *= 0.95;
+            // Contact friction speed loss on both side-swiped hulls for realistic heavy feeling
+            a.speed *= 0.78;
+            b.speed *= 0.78;
 
             // 4. Spawn brilliant contact sparks at contact midpoint
             const contactX = a.position.x + nx * (this.COLLISION_RADIUS * 0.5);

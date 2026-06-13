@@ -337,26 +337,25 @@ export class GamePhysicsService {
     const groundHeight = trackInfo.nearestPoint.y;
     const roadY = groundHeight + 0.05;
 
-    // Realistic Downforce keeps cars grounded at high velocity (eliminates bouncing/air logs)
-    // F_downforce = 1.2 * v^2
-    const downforceY = car.speed > 25 ? -Math.min(30, 0.006 * car.speed * car.speed) : 0;
+    // Realistic Continuous Downforce: F_downforce = -0.022 * v^2 to keep cars extremely planted at speed
+    const downforceY = -0.022 * car.speed * car.speed;
 
     // Vertical physics integration
-    if (car.position.y <= roadY + 0.08) {
-      const compressionDepth = roadY - car.position.y;
-      if (compressionDepth > 0) {
-        car.position.y = roadY;
-        if (car.velocity.y < 0) car.velocity.y = 0;
-      }
+    if (car.position.y <= roadY + 0.15) {
+      const springK = 180.0;     // high-stiffness GT3 racing spring rate
+      const dampC = 16.0;        // heavy race dampers to prevent oscillations
       
-      // Spring elastic force (Hooke's spring-damper representation)
-      const springK = 22.0;
-      car.velocity.y += (roadY - car.position.y) * springK + downforceY * dt;
-      car.velocity.y *= 0.78; // critical dampening friction factor
+      // Net vertical acceleration: Spring force (Hooke's Law) + Damping force + Downforce
+      // a_y = k * (roadY - y) - c * v_y + downforce
+      const accelY = (roadY - car.position.y) * springK - dampC * car.velocity.y + downforceY;
+      
+      // Update velocity using dt
+      car.velocity.y += accelY * dt;
     } else {
       // Airborne gravity
-      const gravity = 24.0;
-      car.velocity.y += (-gravity + downforceY) * dt;
+      const gravity = 28.0;      // strong realistic gravity
+      // In air, we apply downforce too (for wing aero downforce)
+      car.velocity.y += (-gravity + downforceY * 0.5) * dt;
       if (car.velocity.y < -45) car.velocity.y = -45; // terminal velocity limit
     }
 
@@ -365,13 +364,18 @@ export class GamePhysicsService {
     // Secure bottom constraints to absolutely prevent sinking under bridges
     if (car.position.y < roadY) {
       car.position.y = roadY;
-      car.velocity.y = 0;
+      car.velocity.y = Math.max(0, car.velocity.y);
     }
 
-    // Strict ceiling constraint: eliminates extreme bounces or cars flying away
-    if (car.position.y > roadY + 2.5) {
-      car.position.y = roadY + 0.05;
-      car.velocity.y = 0;
+    // Soft height constraints and damping instead of hard teleports:
+    if (car.position.y > roadY + 1.2) {
+      // Gentle soft damping of upward velocity
+      if (car.velocity.y > 0) {
+        car.velocity.y *= Math.exp(-12.0 * dt);
+      }
+      // Apply a restorative force to pull the car back down
+      const heightOffset = car.position.y - (roadY + 1.2);
+      car.velocity.y -= heightOffset * 35.0 * dt;
     }
 
     // --- 7. SOLID GUARDRAIL CONTACT RESOLUTONS ---
