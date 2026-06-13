@@ -10,22 +10,22 @@ THREE.Mesh.prototype.raycast = acceleratedRaycast;
 export class TerrainManager {
   private static instance: TerrainManager | null = null;
   private heightCache: Float32Array;
-  private minX       = -3000;
-  private maxX       =  3000;
-  private minZ       = -3000;
-  private maxZ       =  4500;
-  private resolution =  8; // 8 metres per grid step
+  private minX = -3000;
+  private maxX = 3000;
+  private minZ = -3000;
+  private maxZ = 4500;
+  private resolution = 8; // 8 meters grid step
   private cols: number;
   private rows: number;
   private trackHelper: TrackGeometryHelper | null = null;
 
   // BVH-accelerated road physics mesh
-  private roadBVHMesh:       THREE.Mesh | null        = null;
-  private roadMeshesCache:   THREE.Object3D[]         = [];
+  private roadBVHMesh: THREE.Mesh | null = null;
+  private roadMeshesCache: THREE.Object3D[] = [];
 
   private constructor() {
-    this.cols        = Math.ceil((this.maxX - this.minX) / this.resolution);
-    this.rows        = Math.ceil((this.maxZ - this.minZ) / this.resolution);
+    this.cols = Math.ceil((this.maxX - this.minX) / this.resolution);
+    this.rows = Math.ceil((this.maxZ - this.minZ) / this.resolution);
     this.heightCache = new Float32Array(this.cols * this.rows);
   }
 
@@ -36,73 +36,29 @@ export class TerrainManager {
     return TerrainManager.instance;
   }
 
-  // ───────────────────────────────────────────────────────────────────────────
-  // initialize
-  //
-  // Generates and freezes the heightmap cache once, completely removing
-  // runtime noise evaluation from the render loop.
-  //
-  // OPTIMIZATION: Road carving is now DISABLED during this bake pass.
-  //
-  // Previously, every grid cell called getTerrainHeight(x, z, trackHelper)
-  // which internally called trackHelper.getNearestTrackInfo() — a full
-  // O(2000) spline search per cell. With a 750×937 grid that is:
-  //   750 cols × 937 rows = ~702,750 spline searches at startup.
-  //
-  // Each search touched 2000 Vector3.distanceToSquared() calls and a
-  // sub-sample refinement loop of 9 curve.getPointAt() / getTangentAt()
-  // evaluations — roughly 18,000,000 floating-point operations just to bake
-  // the heightmap, causing the 2-4 second Android browser freeze.
-  //
-  // Fix: pass carveRoad=false to getTerrainHeight(). Road corridor flattening
-  // is then applied by the road mesh itself (which is laid on top at y+0.02)
-  // and is visually indistinguishable from carved terrain.
-  //
-  // To preserve perfect road-edge blending for the terrain vertices that sit
-  // directly adjacent to the road, bakeRoadMeshBVH() is still called after
-  // buildRoadNetwork() — it gives physics accurate snapping without the
-  // startup cost.
-  // ───────────────────────────────────────────────────────────────────────────
+  /**
+   * Generates and freezes the heightmap cache once, completely removing runtime noise evaluation.
+   */
   public initialize(trackHelper: TrackGeometryHelper): void {
     this.trackHelper = trackHelper;
     console.time('TerrainManager Heightmap Baking');
-
     for (let r = 0; r < this.rows; r++) {
       const z = this.minZ + r * this.resolution;
       for (let c = 0; c < this.cols; c++) {
         const x = this.minX + c * this.resolution;
-
-        // OPTIMIZATION: carveRoad=false — skips getNearestTrackInfo() entirely.
-        // This eliminates ~700,000 spline searches during startup, reducing
-        // heightmap bake time from ~2-4 seconds to ~80-120 ms on mid-range
-        // Android hardware.
-        //
-        // Road bed flattening is preserved at render time because:
-        //   1. The road mesh sits at y+0.02 above the terrain.
-        //   2. buildTerrain() reads from this cache via terrainManager.getHeight()
-        //      which returns the raw Perlin height — road blending comes from the
-        //      road geometry, not from terrain vertex displacement.
-        const height = getTerrainHeight(x, z, undefined, false);
-
-        // Guard against NaN poisoning the entire cache — a single bad
-        // getTerrainHeight() result would corrupt every bilinear query that
-        // touches the surrounding four cells for the rest of the session.
-        this.heightCache[r * this.cols + c] = Number.isFinite(height) ? height : 0;
+        const height = getTerrainHeight(x, z, trackHelper);
+        this.heightCache[r * this.cols + c] = height;
       }
     }
-
     console.timeEnd('TerrainManager Heightmap Baking');
   }
 
-  // ───────────────────────────────────────────────────────────────────────────
-  // getHeight
-  //
-  // Fast O(1) bilinear interpolation from the pre-baked heightmap.
-  // Used by buildTerrain() and anywhere a terrain height is needed at runtime.
-  // ───────────────────────────────────────────────────────────────────────────
+  /**
+   * Fast bilinear interpolation height querying in O(1) time
+   */
   public getHeight(x: number, z: number): number {
     if (x < this.minX || x > this.maxX || z < this.minZ || z > this.maxZ) {
-      return -95.0; // bedrock boundary
+      return -95.0; // bed rock boundary
     }
 
     const cf = (x - this.minX) / this.resolution;
@@ -110,6 +66,7 @@ export class TerrainManager {
 
     const c0 = Math.floor(cf);
     const r0 = Math.floor(rf);
+
     const c1 = Math.min(this.cols - 1, c0 + 1);
     const r1 = Math.min(this.rows - 1, r0 + 1);
 
@@ -128,22 +85,17 @@ export class TerrainManager {
     return h0 * (1 - tz) + h1 * tz;
   }
 
-  // ───────────────────────────────────────────────────────────────────────────
-  // bakeRoadMeshBVH
-  //
-  // Caches track road meshes and creates a BVH hierarchy for fast raycasting.
-  //
-  // OPTIMIZATION: Temporary cloned geometries are now explicitly disposed after
-  // merging. Previously they stayed in heap indefinitely — on a complex track
-  // with 400+ slices this leaked hundreds of MB of BufferGeometry data that the
-  // GC could never reclaim because Three.js keeps internal GPU references.
-  // ───────────────────────────────────────────────────────────────────────────
+  /**
+   * Caches track road meshes and creates boundsTree BVH hierarchies on them
+   */
   public bakeRoadMeshBVH(meshes: THREE.Object3D[]): void {
     this.roadMeshesCache = [...meshes];
-
+    
+    // Group all mesh geometries to build a singular highly optimized collision tree
     const geometriesToMerge: THREE.BufferGeometry[] = [];
     meshes.forEach(m => {
       if (m instanceof THREE.Mesh) {
+        // Clone and apply world transformation
         m.updateMatrixWorld(true);
         const geom = m.geometry.clone();
         geom.applyMatrix4(m.matrixWorld);
@@ -154,32 +106,20 @@ export class TerrainManager {
     if (geometriesToMerge.length > 0) {
       try {
         const mergedGeom = mergeGeometries(geometriesToMerge, false);
-
-        // ── MEMORY LEAK FIX ────────────────────────────────────────────────
-        // Dispose all temporary clones immediately after merging.
-        // Without this, each clone (position, normal, uv buffers) stays alive
-        // on the GPU and in JS heap until the page is unloaded.
-        geometriesToMerge.forEach(g => g.dispose());
-        // ───────────────────────────────────────────────────────────────────
-
         if (mergedGeom) {
+          // Build MeshBVH
           (mergedGeom as any).boundsTree = new MeshBVH(mergedGeom);
           this.roadBVHMesh = new THREE.Mesh(mergedGeom, new THREE.MeshBasicMaterial());
-          console.log('Baked compiled Road Network into a single highly optimized BVH bounds tree successfully!');
+          console.log("Baked compiled Road Network into a single highly optimized BVH bounds tree successfully!");
         }
       } catch (err) {
-        // Dispose clones even in the error path to prevent leaking on failure
-        geometriesToMerge.forEach(g => {
-          try { g.dispose(); } catch (_) { /* ignore */ }
-        });
-
-        // Fallback: build boundsTree on individual meshes
+        // Fallback: build boundsTree directly on individual meshes in cache
         meshes.forEach(m => {
           if (m instanceof THREE.Mesh && m.geometry) {
             try {
               (m.geometry as any).boundsTree = new MeshBVH(m.geometry);
             } catch (bvhErr) {
-              console.warn('Could not generate individual MeshBVH structure:', bvhErr);
+              console.warn("Could not generate individual MeshBVH structure:", bvhErr);
             }
           }
         });
@@ -187,28 +127,23 @@ export class TerrainManager {
     }
   }
 
-  // ───────────────────────────────────────────────────────────────────────────
-  // queryRoadHeight
-  //
-  // Executes an accelerated BVH raycast downward from above a position and
-  // returns the road surface Y, or null if no road is under the point.
-  // ───────────────────────────────────────────────────────────────────────────
+  /**
+   * Executes accelerated raycast query
+   */
   public queryRoadHeight(pos: any, outNormal?: THREE.Vector3): number | null {
-    if (
-      !pos ||
-      typeof pos.x !== 'number' || typeof pos.y !== 'number' || typeof pos.z !== 'number' ||
-      isNaN(pos.x) || isNaN(pos.y) || isNaN(pos.z)
-    ) {
+    if (!pos || typeof pos.x !== 'number' || typeof pos.y !== 'number' || typeof pos.z !== 'number' || isNaN(pos.x) || isNaN(pos.y) || isNaN(pos.z)) {
       return null;
     }
 
     try {
       const rayOrigin = MemoryPool.getVector().set(pos.x, pos.y + 20.0, pos.z);
-      const rayDir    = MemoryPool.getVector().set(0, -1, 0);
+      const rayDir = MemoryPool.getVector().set(0, -1, 0);
       const raycaster = MemoryPool.tempRay;
       raycaster.set(rayOrigin, rayDir);
-      raycaster.near         = 0.0;
-      raycaster.far          = 150.0;
+      raycaster.near = 0.0;
+      raycaster.far = 150.0;
+      
+      // Configure raycast for BVH-first traversal
       raycaster.firstHitOnly = true;
 
       if (this.roadBVHMesh) {
@@ -229,10 +164,9 @@ export class TerrainManager {
         }
       }
     } catch (e) {
-      console.warn('Exception in queryRoadHeight raycast helper:', e);
+      console.warn("Exception in queryRoadHeight raycast helper:", e);
     }
     return null;
   }
 }
-
 export const terrainManager = TerrainManager.getInstance();
