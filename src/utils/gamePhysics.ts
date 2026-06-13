@@ -6,53 +6,49 @@
 import * as THREE from 'three';
 import { CarState, ControlsState, Checkpoint, Vector3D, Difficulty } from '../types';
 import { TrackGeometryHelper } from './track';
-import { SpatialGrid } from './spatialGrid';
 import { particleSystem } from '../world/particleSystem';
+import { SuspensionSystem, SuspensionState } from './suspension';
+import { CarCollisionSystem } from './carCollision';
+import { TrafficAIService } from './trafficAI';
 
-// Arcade-optimized physics parameters matching Asphalt 8 or CarX Drift Racing styles
+// Constant physical constraints matching hypercar simulator performance
 const MAX_SPEED = 78; // units/sec (~280 km/h)
 const REVERSE_MAX_SPEED = 28; // units/sec (~100 km/h)
-const ACCELERATION = 40; // snappy, smooth acceleration response
-const DECELERATION = 10; // smooth rolling deceleration (engine drag)
-const BRAKING = 62; // intense braking feedback
-const STEER_SPEED = 2.8; // base steering speed in rad/sec
-const FRICTION = 0.988; // low rolling drag friction
-const DRIFT_GRIP = 0.88; // side slide factor during high angle drift
-const NORMAL_GRIP = 0.982; // normal tire side friction (grips unless throwing the weight)
-const NITRO_BOOST_SPEED = 108; // dynamic peak speeds (~388 km/h)
-const NITRO_BOOST_ACCEL = 75; // explosive rocket launch nitro boost acceleration
-
-export interface ParticleEffect {
-  id?: string;
-  active: boolean;
-  position: THREE.Vector3;
-  velocity: THREE.Vector3;
-  color: string;
-  size: number;
-  life: number; // 1 to 0
-  decay: number;
-  isNitro?: boolean;
-  isSpark?: boolean;
-}
+const ACCELERATION = 40; // responsive torque curve
+const DECELERATION = 14; // mechanical engine compression drag
+const BRAKING = 65; // high-efficiency carbon brakes
+const STEER_SPEED = 2.85; // baseline steering rate (rad/sec)
+const FRICTION = 0.988; // stable rolling tyre resistance
+const DRIFT_GRIP = 0.86; // sliding slip factor
+const NORMAL_GRIP = 0.984; // static tyre friction coefficient
+const NITRO_BOOST_SPEED = 108; // maximum nitro speeds (~390 km/h)
+const NITRO_BOOST_ACCEL = 75; // explosive rocket launch nitro charge up
 
 export class GamePhysicsService {
-  trackHelper: TrackGeometryHelper;
-  sparkCounter = 0;
+  public trackHelper: TrackGeometryHelper;
+  public sparkCounter = 0;
+  
+  // Traffic management service delegation
+  private trafficAIService: TrafficAIService;
 
-  // Track progress history for exact lap counting without checkpoints skip
+  // Track progress history for exact lap counting
   private carProgressHistory = new Map<string, number>();
   private carHasPassedMidpoint = new Map<string, boolean>();
 
-  // Zero-allocation static scratchpads
+  // Zero-allocation vector caches
   private static readonly _vecA = new THREE.Vector3();
   private static readonly _vecB = new THREE.Vector3();
   private static readonly _vecC = new THREE.Vector3();
 
   constructor(trackHelper: TrackGeometryHelper) {
     this.trackHelper = trackHelper;
+    this.trafficAIService = new TrafficAIService(trackHelper);
   }
 
-  spawnParticle(
+  /**
+   * Spawns physical particles into the world environment
+   */
+  public spawnParticle(
     x: number, y: number, z: number,
     vx: number, vy: number, vz: number,
     color: string, size: number, decay: number,
@@ -70,17 +66,18 @@ export class GamePhysicsService {
     particleSystem.spawn(type, x, y, z, vx, vy, vz, color, size, decay);
   }
 
-  // Create starting lineup arrangement with realistic spacing
-  initializeCars(playerName: string, difficulty: Difficulty, playerCarColor: string): CarState[] {
+  /**
+   * Initialises the active lineup of opponents, the player, and dense commuter traffic
+   */
+  public initializeCars(playerName: string, difficulty: Difficulty, playerCarColor: string): CarState[] {
     const aiColors = ['#ff003c', '#00f6ff', '#e100ff', '#ffac00', '#00ff3c'];
     const aiNames = ['Apex', 'Phantom', 'Nova', 'Blaze', 'Titan'];
     const result: CarState[] = [];
 
-    // Clear progress histories on re-init
     this.carProgressHistory.clear();
     this.carHasPassedMidpoint.clear();
 
-    // 1. Setup Player
+    // 1. Setup Player Racer
     const playerSpawnX = -6;
     const playerSpawnZ = -15;
     const tempP3 = new THREE.Vector3(playerSpawnX, 0, playerSpawnZ);
@@ -93,7 +90,7 @@ export class GamePhysicsService {
       name: playerName || 'Player',
       isAI: false,
       color: playerCarColor || '#0062ff',
-      position: { x: playerSpawnX, y: playerSpawnY, z: playerSpawnZ }, // starting node lane grid offset
+      position: { x: playerSpawnX, y: playerSpawnY, z: playerSpawnZ },
       velocity: { x: 0, y: 0, z: 0 },
       speed: 0,
       angle: 0.15,
@@ -115,7 +112,7 @@ export class GamePhysicsService {
       aiAggression: 0.5,
     });
 
-    // 2. Setup 5 AI Challengers
+    // 2. Setup 5 Grid AI Competitors
     for (let i = 0; i < 5; i++) {
       const row = Math.floor(i / 2) + 1;
       const side = i % 2 === 0 ? 1 : -1;
@@ -132,10 +129,10 @@ export class GamePhysicsService {
       let aggression = 0.45;
       if (difficulty === 'medium') {
         speedFactor = 0.98;
-        aggression = 0.75;
+        aggression = 0.72;
       } else if (difficulty === 'hard') {
-        speedFactor = 1.08;
-        aggression = 0.98;
+        speedFactor = 1.06;
+        aggression = 0.95;
       }
 
       result.push({
@@ -161,68 +158,25 @@ export class GamePhysicsService {
         isNitroActive: false,
         difficulty,
         aiTargetNode: 0,
-        aiSpeedFactor: speedFactor + (Math.random() * 0.05 - 0.025),
+        aiSpeedFactor: speedFactor + (Math.random() * 0.04 - 0.02),
         aiAggression: aggression,
         stuckTimer: 0,
       });
     }
 
-    // 3. Setup 4 Slower Traffic Obstacles (to preserve Asphalt 9 style near misses at 300+ km/h)
-    const trafficColors = ['#f3f4f6', '#fbbf24', '#9ca3af', '#93c5fd']; // Silver, Yellow Taxi, Gray, Sky Blue
-    const trafficNames = ['Commuter', 'Cab', 'Sedan', 'Commuter'];
-    const trackLength = this.trackHelper.length || 4150.0;
-    
-    for (let t = 0; t < 4; t++) {
-      const progress = 0.18 + t * 0.22;
-      const pt = this.trackHelper.curve ? this.trackHelper.curve.getPointAt(progress) : new THREE.Vector3();
-      const tangent = this.trackHelper.curve ? this.trackHelper.curve.getTangentAt(progress).normalize() : new THREE.Vector3(0, 0, 1);
-      const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
-      
-      // Steady lane offsets
-      const laneSide = t % 2 === 0 ? -4.5 : 4.5;
-      const spawnPos = pt.clone().addScaledVector(normal, laneSide);
-      const angle = Math.atan2(tangent.x, tangent.z);
+    // 3. Delegate dense commute traffic spawning to TrafficAIService (Spawns 32 coherent vehicles)
+    const trafficLineup = this.trafficAIService.generateTrafficLineup();
+    result.push(...trafficLineup);
 
-      const trafficPos3 = new THREE.Vector3(spawnPos.x, 0, spawnPos.z);
-      const trafficTrackInfo = this.trackHelper.getNearestTrackInfo(trafficPos3);
-      const trafficRoadHeight = trafficTrackInfo ? trafficTrackInfo.nearestPoint.y : 0;
-      const trafficSpawnY = trafficRoadHeight + 0.05;
-      
-      result.push({
-        id: `traffic_${t}`,
-        name: trafficNames[t],
-        isAI: true,
-        color: trafficColors[t],
-        position: { x: spawnPos.x, y: trafficSpawnY, z: spawnPos.z },
-        velocity: { x: tangent.x * 6, y: 0, z: tangent.z * 6 },
-        speed: 22,
-        angle: angle,
-        angularVelocity: 0,
-        driftFactor: 0,
-        isDrifting: false,
-        currentLap: 1,
-        currentCheckpointIndex: 0,
-        distanceToNextCheckpoint: 999,
-        racePosition: 99,
-        totalDistanceTraveled: progress * trackLength,
-        isFinished: false,
-        lastActiveTime: Date.now(),
-        nitroCharged: 0,
-        isNitroActive: false,
-        aiTargetNode: Math.floor(progress * this.trackHelper.cachedPoints.length),
-        aiSpeedFactor: 0.32,
-        aiAggression: 0.1,
-        stuckTimer: 0,
-      });
-    }
-
+    console.log(`Successfully initialized a total of ${result.length} vehicles (1 player, 5 AI rivals, 32 traffic cars).`);
     return result;
   }
 
-  // Master update tick for a vehicle
-  updateCar(car: CarState, dt: number, controls: ControlsState, isLocked: boolean) {
+  /**
+   * Evaluates the physical dynamics (acceleration, brakes, drift, downforce, gravity) for a vehicle state
+   */
+  public updateCar(car: CarState, dt: number, controls: ControlsState, isLocked: boolean) {
     if (car.isFinished) {
-      // decelerate elegantly
       car.speed *= 0.94;
       car.isNitroActive = false;
       car.velocity.x *= 0.94;
@@ -231,7 +185,6 @@ export class GamePhysicsService {
     }
 
     if (isLocked) {
-      // hold cars on starting line
       car.speed = 0;
       car.velocity = { x: 0, y: 0, z: 0 };
       car.isNitroActive = false;
@@ -239,83 +192,74 @@ export class GamePhysicsService {
     }
 
     const currentGear = controls.gear || 'D';
-
-    // 1. Process gears & smooth acceleration / braking curves
     const topSpeed = car.isNitroActive ? NITRO_BOOST_SPEED : MAX_SPEED;
     const accelRate = car.isNitroActive ? NITRO_BOOST_ACCEL : ACCELERATION;
     const speedRatio = Math.abs(car.speed) / topSpeed;
 
+    // --- 1. TRANSMISSION TORQUE ENGINE & ACCELERATION ---
     if (currentGear === 'P') {
-      // Locking park gear (immediate friction lock)
-      car.speed = THREE.MathUtils.lerp(car.speed, 0, 16.0 * dt);
+      car.speed = THREE.MathUtils.lerp(car.speed, 0, 15.0 * dt);
       if (Math.abs(car.speed) < 0.1) car.speed = 0;
     } 
     else if (currentGear === 'N') {
-      // Free rolling neutral gear, only gradual friction decay
       if (car.speed > 0) {
-        car.speed = Math.max(0, car.speed - DECELERATION * 0.6 * dt);
+        car.speed = Math.max(0, car.speed - DECELERATION * 0.5 * dt);
       } else if (car.speed < 0) {
-        car.speed = Math.min(0, car.speed + DECELERATION * 0.6 * dt);
+        car.speed = Math.min(0, car.speed + DECELERATION * 0.5 * dt);
       }
     } 
     else if (currentGear === 'D') {
-      // Drive mode
       if (controls.forward) {
-        // Torque curve: higher gear pulls less at peak extremes, imitating mechanical cylinders
-        const torqueRatio = Math.max(0.3, Math.pow(1.0 - speedRatio, 0.72));
+        // Torque curve imitating mechanical transmission ratios (less pull at top extremes)
+        const torqueRatio = Math.max(0.35, Math.pow(1.0 - speedRatio, 0.7));
         car.speed += accelRate * torqueRatio * dt;
         if (car.speed > topSpeed) car.speed = topSpeed;
       } else if (controls.backward) {
-        // Pressing brake pedal decelerates strongly, with extra force at high speeds
-        const brakeEfficiency = 1.0 + speedRatio * 0.45;
+        const brakeEfficiency = 1.0 + speedRatio * 0.5;
         car.speed -= BRAKING * brakeEfficiency * dt;
-        if (car.speed < 0) car.speed = 0; // driving gear prevents reversing
+        if (car.speed < 0) car.speed = 0;
       } else {
-        // gradual rolling deceleration when throttle is released
         car.speed = Math.max(0, car.speed - DECELERATION * dt);
       }
     } 
     else if (currentGear === 'R') {
-      // Reverse mode
-      if (controls.forward) {
-        // Under Gas Pedal in R gear (mapped to controls.forward), accelerate backward!
-        const reverseRatio = Math.max(0.4, 1.0 - (Math.abs(car.speed) / REVERSE_MAX_SPEED) * 0.4);
+      if (controls.forward) { // under accelerator in Reverse
+        const reverseRatio = Math.max(0.4, 1.0 - (Math.abs(car.speed) / REVERSE_MAX_SPEED) * 0.45);
         car.speed -= ACCELERATION * 0.7 * reverseRatio * dt;
         if (car.speed < -REVERSE_MAX_SPEED) car.speed = -REVERSE_MAX_SPEED;
-      } else if (controls.backward) {
-        // Under Brake pedal in R, stop the rear crawl
-        const brakeEfficiency = 1.0 + (Math.abs(car.speed) / REVERSE_MAX_SPEED) * 0.4;
+      } else if (controls.backward) { // under brake in Reverse
+        const brakeEfficiency = 1.0 + (Math.abs(car.speed) / REVERSE_MAX_SPEED) * 0.45;
         car.speed += BRAKING * brakeEfficiency * dt;
-        if (car.speed > 0) car.speed = 0; // reverse gear stops at zero
+        if (car.speed > 0) car.speed = 0;
       } else {
-        // gradual deceleration backwards
         car.speed = Math.min(0, car.speed + DECELERATION * dt);
       }
     }
 
-    // Apply handbrake braking decay
     if (controls.handbrake) {
       if (car.speed > 0) {
-        car.speed = Math.max(0, car.speed - BRAKING * 0.9 * dt);
+        car.speed = Math.max(0, car.speed - BRAKING * 0.85 * dt);
       } else if (car.speed < 0) {
-        car.speed = Math.min(0, car.speed + BRAKING * 0.9 * dt);
+        car.speed = Math.min(0, car.speed + BRAKING * 0.85 * dt);
       }
     }
 
-    // Aerodynamic and Rolling Resistance drag (fluid physical deceleration damping)
+    // --- 2. AERODYNAMIC AIR RESISTANCE ---
+    // Quad-drag fluid resistance (acts heavily above 200 km/h)
+    const dragCoeff = 0.0016;
+    const dragForce = (dragCoeff * car.speed * car.speed + 0.1) * dt;
     if (car.speed > 0) {
-      car.speed = Math.max(0, car.speed - (0.0018 * car.speed * car.speed + 0.12) * dt);
+      car.speed = Math.max(0, car.speed - dragForce);
     } else if (car.speed < 0) {
-      car.speed = Math.min(0, car.speed + (0.0018 * car.speed * car.speed + 0.12) * dt);
+      car.speed = Math.min(0, car.speed + dragForce);
     }
 
-    // Nitro charges slowly over time, fast charges during drifting
+    // --- 3. NITRO ACCUMULATION ---
     if (!car.isNitroActive) {
-      const isDriftBonus = (car.isDrifting && Math.abs(car.speed) > 22) ? 26 : 4;
+      const isDriftBonus = (car.isDrifting && Math.abs(car.speed) > 22) ? 28 : 5;
       car.nitroCharged = Math.min(100, car.nitroCharged + isDriftBonus * dt);
 
-      // Strategic AI boost trigger
-      if (car.isAI && car.nitroCharged > 92 && Math.abs(car.speed) > topSpeed * 0.6 && Math.random() < 0.05) {
+      if (car.isAI && car.nitroCharged > 90 && Math.abs(car.speed) > topSpeed * 0.65 && Math.random() < 0.04) {
         car.isNitroActive = true;
       } else if (!car.isAI && controls.nitro && car.nitroCharged > 15) {
         car.isNitroActive = true;
@@ -323,185 +267,185 @@ export class GamePhysicsService {
     }
 
     if (car.isNitroActive) {
-      car.nitroCharged -= 28 * dt; // consume nitro
+      car.nitroCharged -= 28 * dt;
       if (car.nitroCharged <= 0) {
         car.nitroCharged = 0;
         car.isNitroActive = false;
       }
     }
 
-    // 2. Speed-Sensitive Steering with realistic damping and return force
-    const RawSteer = controls.steerValue !== undefined ? controls.steerValue : (controls.left ? 1 : (controls.right ? -1 : 0));
-    const steerSmoothingRate = Math.abs(RawSteer) > 0.01 ? 11.5 : 14.5;
-    car.steerValue = THREE.MathUtils.lerp(car.steerValue || 0, RawSteer, steerSmoothingRate * dt);
+    // --- 4. SPEED-SENSITIVE ANALOG STEERING & YAW ---
+    const rawSteerInput = controls.steerValue !== undefined ? controls.steerValue : (controls.left ? 1 : (controls.right ? -1 : 0));
+    const smoothFactor = Math.abs(rawSteerInput) > 0.01 ? 12.0 : 15.0;
+    car.steerValue = THREE.MathUtils.lerp(car.steerValue || 0, rawSteerInput, smoothFactor * dt);
 
-    // Steering sensitivity decays at hyper speed to prevent sudden high-frequency direct oscillation
+    // Steering speed decays at higher velocities to prevent spinouts on minor triggers
     const speedRatioPhys = Math.min(1.0, Math.abs(car.speed) / MAX_SPEED);
-    const steerCorrection = Math.max(0.35, 1.0 - (speedRatioPhys * 0.48));
+    const steerDamp = Math.max(0.32, 1.0 - (speedRatioPhys * 0.48));
+    const driftSteerMultiplier = car.isDrifting ? 1.72 : 1.08;
+
+    car.angularVelocity = STEER_SPEED * steerDamp * driftSteerMultiplier * (car.steerValue || 0);
+
+    // Turn yaw angle only when vehicle is in motion
+    const movementGripFactor = Math.min(1.0, Math.abs(car.speed) / 3.0);
+    car.angle += car.angularVelocity * dt * (car.speed < 0 ? -movementGripFactor : movementGripFactor);
+
+    // --- 5. DRIFT CONTROLS AND COUNTER-STEER STABILIZATION ---
+    const isSharpTurn = Math.abs(car.steerValue || 0) > 0.45;
+    const minDriftThreshold = car.id.startsWith('traffic') ? 25 : 18;
+    const wantsDrifting = controls.handbrake || (isSharpTurn && Math.abs(car.speed) > minDriftThreshold);
+    car.isDrifting = wantsDrifting && Math.abs(car.speed) > minDriftThreshold && currentGear !== 'P';
+
+    car.driftFactor = THREE.MathUtils.lerp(car.driftFactor || 0, car.isDrifting ? 1 : 0, 7.5 * dt);
+    const currentGrip = car.isDrifting ? DRIFT_GRIP : NORMAL_GRIP;
+    const gripFactor = controls.handbrake ? currentGrip * 0.90 : currentGrip;
     
-    // Drifting boosts yaw rate (controlled oversteer slide angles)
-    const driftSteerMultiplier = car.isDrifting ? 1.75 : 1.1;
-    car.angularVelocity = STEER_SPEED * steerCorrection * driftSteerMultiplier * (car.steerValue || 0);
+    const activeGrip = THREE.MathUtils.lerp(NORMAL_GRIP, gripFactor, car.driftFactor);
 
-    // Only steer when vehicle is moving
-    const driveMovementFactor = Math.min(1.0, Math.abs(car.speed) / 3.5);
-    car.angle += car.angularVelocity * dt * (car.speed < 0 ? -driveMovementFactor : driveMovementFactor);
-
-    // 3. Realistic Drift & Slip Mechanics (Slip Angles, Dynamic Side Grip)
-    const turningSharpness = Math.abs(car.steerValue || 0) > 0.48;
-    const speedThreshold = car.isAI ? 18 : 22;
-    const wantsDrift = controls.handbrake || (turningSharpness && Math.abs(car.speed) > speedThreshold);
-    car.isDrifting = wantsDrift && Math.abs(car.speed) > speedThreshold && currentGear !== 'P';
-
-    // Linear slip interpolation
-    const baseGrip = car.isDrifting ? DRIFT_GRIP : NORMAL_GRIP;
-    const currentGrip = controls.handbrake ? baseGrip * 0.92 : baseGrip;
-
-    car.driftFactor = THREE.MathUtils.lerp(car.driftFactor || 0, car.isDrifting ? 1 : 0, 8 * dt);
-    const activeGrip = THREE.MathUtils.lerp(NORMAL_GRIP, currentGrip, car.driftFactor);
-
-    // Facing directional components
-    const forwardX = Math.sin(car.angle);
+    // Facing angles
+    const fowardX = Math.sin(car.angle);
     const forwardZ = Math.cos(car.angle);
 
-    const targetVelX = forwardX * car.speed;
+    const targetVelX = fowardX * car.speed;
     const targetVelZ = forwardZ * car.speed;
 
-    // Weight Transfer G-Force: Inertia slides the car sideways relative to tire side friction
+    // Settle lateral slipping forces based on tire grip friction coefficients
     car.velocity.x = car.velocity.x * activeGrip + targetVelX * (1 - activeGrip);
     car.velocity.z = car.velocity.z * activeGrip + targetVelZ * (1 - activeGrip);
 
-    // Lateral drag
     car.velocity.x *= FRICTION;
     car.velocity.z *= FRICTION;
 
-    // Apply Counter-Steering Assistance: Assist drift control to stabilize extreme slides (CarX style)
+    // counter-steering assistance (helps maintain drift control, preventing random spins)
     if (car.isDrifting) {
-      const velocityAngle = Math.atan2(car.velocity.x, car.velocity.z);
-      let slipAngle = velocityAngle - car.angle;
+      const velHeading = Math.atan2(car.velocity.x, car.velocity.z);
+      let slipAngle = velHeading - car.angle;
       while (slipAngle < -Math.PI) slipAngle += Math.PI * 2;
       while (slipAngle > Math.PI) slipAngle -= Math.PI * 2;
 
-      // Front wheels steer into the drift automatically to guide G-force direction
-      const assistFactor = car.isAI ? 0.4 : 0.88;
+      const assistFactor = car.isAI ? 0.45 : 0.85;
       car.angle += slipAngle * assistFactor * dt;
     }
 
-    // Update 3D positional integrals
+    // Integrate positions
     car.position.x += car.velocity.x * dt;
     car.position.z += car.velocity.z * dt;
 
-    // Keep car securely on track (terrain clamping + bridge transitions)
+    // --- 6. VERTICAL SUSPENSION, DOWNFORCE & GRAVITY CLAMPING ---
     const pos3 = GamePhysicsService._vecA.set(car.position.x, car.position.y, car.position.z);
     const trackInfo = this.trackHelper.getNearestTrackInfo(pos3, car.id);
+    const groundHeight = trackInfo.nearestPoint.y;
+    const roadY = groundHeight + 0.05;
 
-    // Exact spline altitude mapping
-    const roadHeight = trackInfo.nearestPoint.y;
-    let roadY = roadHeight + 0.05;
+    // Realistic Downforce keeps cars grounded at high velocity (eliminates bouncing/air logs)
+    // F_downforce = 1.2 * v^2
+    const downforceY = car.speed > 25 ? -Math.min(30, 0.006 * car.speed * car.speed) : 0;
 
-    // Advanced Vertical Suspension Engine (Gravity when airborne, spring-damper when grounded)
-    if (car.position.y <= roadY + 0.05) {
-      const depth = roadY - car.position.y;
-      if (depth > 0) {
+    // Vertical physics integration
+    if (car.position.y <= roadY + 0.08) {
+      const compressionDepth = roadY - car.position.y;
+      if (compressionDepth > 0) {
         car.position.y = roadY;
         if (car.velocity.y < 0) car.velocity.y = 0;
       }
-      // Grounded suspension force tracking
-      car.velocity.y += (roadY - car.position.y) * 18.0;
-      car.velocity.y *= 0.82; // damping force
+      
+      // Spring elastic force (Hooke's spring-damper representation)
+      const springK = 22.0;
+      car.velocity.y += (roadY - car.position.y) * springK + downforceY * dt;
+      car.velocity.y *= 0.78; // critical dampening friction factor
     } else {
-      // Airborne gravity tracking
-      car.velocity.y -= 22.0 * dt;
-      if (car.velocity.y < -40) car.velocity.y = -40; // terminal velocity
+      // Airborne gravity
+      const gravity = 24.0;
+      car.velocity.y += (-gravity + downforceY) * dt;
+      if (car.velocity.y < -45) car.velocity.y = -45; // terminal velocity limit
     }
 
     car.position.y += car.velocity.y * dt;
 
-    // Prevent sinking
-    if (car.position.y < roadHeight + 0.05) {
-      car.position.y = roadHeight + 0.05;
+    // Secure bottom constraints to absolutely prevent sinking under bridges
+    if (car.position.y < roadY) {
+      car.position.y = roadY;
       car.velocity.y = 0;
     }
 
-    // ANTI-FLOATING SAFETY
-    if (car.position.y > roadHeight + 0.2) {
-      car.position.y = roadHeight + 0.05;
+    // Strict ceiling constraint: eliminates extreme bounces or cars flying away
+    if (car.position.y > roadY + 2.5) {
+      car.position.y = roadY + 0.05;
+      car.velocity.y = 0;
     }
 
-    // 4. Absolute Solid Guardrail Barrier Constraint (Ricochet Bouncing)
-    const allowedOffset = trackInfo.width / 2 - 1.5;
-    if (Math.abs(trackInfo.sideOffset) > allowedOffset) {
-      const sign = Math.sign(trackInfo.sideOffset);
+    // --- 7. SOLID GUARDRAIL CONTACT RESOLUTONS ---
+    CarCollisionSystem.resolveWallCollision(
+      car,
+      trackInfo,
+      this.spawnParticle.bind(this),
+      dt
+    );
 
-      // Instantly position back on boundary margin to avoid clipping or going off-world
-      car.position.x = trackInfo.nearestPoint.x + trackInfo.normal.x * allowedOffset * sign;
-      car.position.z = trackInfo.nearestPoint.z + trackInfo.normal.z * allowedOffset * sign;
-
-      // Soft Elastic Ricochet Rebound opposite to boundary plane
-      const velVec = GamePhysicsService._vecB.set(car.velocity.x, 0, car.velocity.z);
-      const normalVec = GamePhysicsService._vecC.set(trackInfo.normal.x, 0, trackInfo.normal.z).multiplyScalar(sign);
-
-      const vNormalDot = velVec.dot(normalVec);
-      if (vNormalDot > 0) { // moving into the rail
-        const restitution = 0.38; // Satisfying springy rebound
-        velVec.addScaledVector(normalVec, -(1 + restitution) * vNormalDot);
-
-        // Instant speed reduction from side contact
-        car.speed *= Math.max(0.4, 1.0 - (vNormalDot / MAX_SPEED) * 0.42);
-
-        car.velocity.x = velVec.x;
-        car.velocity.z = velVec.z;
-      }
-
-      // Spark feedback
-      this.generateBoundarySparks(car.position, trackInfo.normal, sign);
-    }
-
-    // 5. Track Progression & Checkpoint register
+    // Progress updates
     this.updateRaceChecking(car, trackInfo.progress, pos3);
   }
 
-  // Generates sparks when hitting barriers
-  private generateBoundarySparks(carPos: Vector3D, normal: THREE.Vector3, pushSign: number) {
-    this.sparkCounter++;
-    if (this.sparkCounter % 2 !== 0) return;
-
-    for (let i = 0; i < 3; i++) {
-      const vx = normal.x * -pushSign * (4 + Math.random() * 8) + (Math.random() * 3 - 1.5);
-      const vy = 2 + Math.random() * 5;
-      const vz = normal.z * -pushSign * (4 + Math.random() * 8) + (Math.random() * 3 - 1.5);
-
-      this.spawnParticle(
-        carPos.x, carPos.y + 0.3, carPos.z,
-        vx, vy, vz,
-        Math.random() > 0.4 ? '#ff7c00' : '#ffa600',
-        0.18 + Math.random() * 0.16,
-        1.8 + Math.random() * 2.2,
-        false, true
-      );
+  /**
+   * Tracks progression, registring checkpoints and counting lap loops
+   */
+  private updateRaceChecking(car: CarState, progress: number, pos3: THREE.Vector3) {
+    let prevProgress = this.carProgressHistory.get(car.id);
+    if (prevProgress === undefined) {
+      prevProgress = progress;
     }
+    this.carProgressHistory.set(car.id, progress);
+
+    const chpts = this.trackHelper.checkpoints;
+    const numCheckpoints = chpts.length;
+    car.currentCheckpointIndex = Math.min(numCheckpoints - 1, Math.floor(progress * numCheckpoints));
+
+    if (car.currentCheckpointIndex > 10 && car.currentCheckpointIndex < 20) {
+      this.carHasPassedMidpoint.set(car.id, true);
+    }
+
+    // Crossing start/finish line checks
+    if (prevProgress > 0.82 && progress < 0.18) {
+      const hasPassedMid = this.carHasPassedMidpoint.get(car.id) || false;
+      if (hasPassedMid) {
+        if (!car.isFinished) {
+          if (car.currentLap === 3) {
+            car.isFinished = true;
+          } else {
+            car.currentLap += 1;
+            this.carHasPassedMidpoint.set(car.id, false);
+          }
+        }
+      }
+    }
+
+    // Calculate checkpoint distance
+    const nextChptIndex = (car.currentCheckpointIndex + 1) % numCheckpoints;
+    const nextChpt = chpts[nextChptIndex];
+
+    if (nextChpt && nextChpt.position) {
+      const chptPos = GamePhysicsService._vecB.set(nextChpt.position.x, nextChpt.position.y, nextChpt.position.z);
+      if (pos3 && typeof pos3.distanceTo === 'function' && chptPos && typeof chptPos.distanceToSquared === 'function') {
+        car.distanceToNextCheckpoint = pos3.distanceTo(chptPos);
+      } else {
+        car.distanceToNextCheckpoint = 999;
+      }
+    } else {
+      car.distanceToNextCheckpoint = 999;
+    }
+
+    const trackLength = this.trackHelper.length || 4150.0;
+    let displayProgress = progress;
+    if (car.currentLap === 1 && progress > 0.82) {
+      displayProgress = progress - 1.0;
+    }
+    car.totalDistanceTraveled = (car.currentLap - 1) * trackLength + displayProgress * trackLength;
   }
 
-  // Generates collision sparkles between cars
-  private generateContactSparks(x: number, y: number, z: number, nx: number, nz: number) {
-    for (let i = 0; i < 4; i++) {
-      const vx = nx * (5 + Math.random() * 10) + (Math.random() * 4 - 2);
-      const vy = 1.5 + Math.random() * 6;
-      const vz = nz * (5 + Math.random() * 10) + (Math.random() * 4 - 2);
-
-      this.spawnParticle(
-        x, y, z,
-        vx, vy, vz,
-        Math.random() > 0.5 ? '#ffff00' : '#ffa200',
-        0.2 + Math.random() * 0.2,
-        1.5 + Math.random() * 2.0,
-        false, true
-      );
-    }
-  }
-
-  // Continuous visual particles tick generator
-  generateExhaustParticles(car: CarState, dt: number) {
+  /**
+   * Generates exhaust emission smoke, tire smoke during drift and blue nitro trails
+   */
+  public generateExhaustParticles(car: CarState, dt: number) {
     if (car.speed === 0) return;
 
     const angleBack = car.angle + Math.PI;
@@ -520,7 +464,6 @@ export class GamePhysicsService {
     const exRX = car.position.x + backOffsetX - ux * 0.72;
     const exRZ = car.position.z + backOffsetZ - uz * 0.72;
 
-    // 1. Hot Blue Rocket Nitro Flares particle simulation
     if (car.isNitroActive) {
       for (let i = 0; i < 2; i++) {
         const vx = -Math.sin(car.angle) * 16 + (Math.random() * 2.5 - 1.25);
@@ -541,7 +484,6 @@ export class GamePhysicsService {
       }
     }
 
-    // 2. Thick Drift Tire Smoke and Dust Particles
     if (car.isDrifting && Math.abs(car.speed) > 18) {
       for (let i = 0; i < 3; i++) {
         const vx = Math.random() * 4.2 - 2.1;
@@ -564,327 +506,175 @@ export class GamePhysicsService {
     }
   }
 
-  // Update physical positions of sparks / smoke with air friction and gravity
-  updateParticles(dt: number) {
+  /**
+   * Continuous particles update tick
+   */
+  public updateParticles(dt: number) {
     particleSystem.update(dt);
   }
 
-  // Bulletproof Continuous progress checkpoint and lap tracking
-  private updateRaceChecking(car: CarState, progress: number, pos3: THREE.Vector3) {
-    let prevProgress = this.carProgressHistory.get(car.id);
-    if (prevProgress === undefined) {
-      prevProgress = progress;
-    }
-    this.carProgressHistory.set(car.id, progress);
-
-    const chpts = this.trackHelper.checkpoints;
-    const numCheckpoints = chpts.length;
-    car.currentCheckpointIndex = Math.min(numCheckpoints - 1, Math.floor(progress * numCheckpoints));
-
-    // Tracks if vehicle has passed the midpoint region of the track (Checkpoints 10 to 20 out of 30)
-    if (car.currentCheckpointIndex > 10 && car.currentCheckpointIndex < 20) {
-      this.carHasPassedMidpoint.set(car.id, true);
-    }
-
-    // Watch for Start/Finish line crossing (forward direction checks)
-    if (prevProgress > 0.82 && progress < 0.18) {
-      const hasPassedMid = this.carHasPassedMidpoint.get(car.id) || false;
-      if (hasPassedMid) {
-        if (!car.isFinished) {
-          if (car.currentLap === 3) {
-            car.isFinished = true;
-          } else {
-            car.currentLap += 1;
-            this.carHasPassedMidpoint.set(car.id, false); // reset for subsequent lap
-          }
-        }
-      }
-    }
-
-    // Decollect checkpoint indexes on active progression mapping
-    const nextChptIndex = (car.currentCheckpointIndex + 1) % numCheckpoints;
-    const nextChpt = chpts[nextChptIndex];
-
-    if (nextChpt && nextChpt.position) {
-      const chptPos = GamePhysicsService._vecB.set(nextChpt.position.x, nextChpt.position.y, nextChpt.position.z);
-      if (pos3 && typeof pos3.distanceTo === 'function' && chptPos && typeof chptPos.distanceToSquared === 'function') {
-        car.distanceToNextCheckpoint = pos3.distanceTo(chptPos);
-      } else {
-        car.distanceToNextCheckpoint = 999;
-      }
-    } else {
-      car.distanceToNextCheckpoint = 999;
-    }
-
-    // Continuous distance traveled matching actual spline length
-    const trackLength = this.trackHelper.length || 4150.0;
-    let displayProgress = progress;
-    if (car.currentLap === 1 && progress > 0.82) {
-      // Car is on the starting grid behind the start/finish line on lap 1
-      displayProgress = progress - 1.0;
-    }
-    car.totalDistanceTraveled = (car.currentLap - 1) * trackLength + displayProgress * trackLength;
+  /**
+   * Resolves vehicle-to-vehicle soft impact overrides
+   */
+  public resolveCarCollisions(cars: CarState[]) {
+    CarCollisionSystem.resolveVehicleCollisions(cars, this.spawnParticle.bind(this));
   }
 
-  // Pairwise soft body vehicle on vehicle elastic collisions resolver
-  resolveCarCollisions(cars: CarState[]) {
-    const size = cars.length;
-    const collisionRadius = 3.6; // bumper bounds overlap padding
-    const radiusSq = collisionRadius * collisionRadius;
-
-    // 1. Build spatial hash grid
-    const grid = new SpatialGrid(22); // cell size 22m (around 6x car length)
-    for (let i = 0; i < size; i++) {
-      const a = cars[i];
-      if (a && a.position && !a.isFinished) {
-        grid.insert(a);
-      }
-    }
-
-    // Track resolved pairs to avoid double-processing
-    const resolvedPairs = new Set<string>();
-
-    for (let i = 0; i < size; i++) {
-      const a = cars[i];
-      if (!a || !a.position || !a.velocity || a.isFinished) continue;
-
-      const nearby = grid.getNearby(a);
-      for (const b of nearby) {
-        if (!b || !b.position || !b.velocity || b.isFinished) continue;
-
-        // Order IDs consistently to prevent duplicate pair processing
-        const pairId = a.id < b.id ? `${a.id}:${b.id}` : `${b.id}:${a.id}`;
-        if (resolvedPairs.has(pairId)) continue;
-        resolvedPairs.add(pairId);
-
-        const dx = b.position.x - a.position.x;
-        const dz = b.position.z - a.position.z;
-        const distSq = dx * dx + dz * dz;
-
-        if (distSq < radiusSq && distSq > 0.001) {
-          const dist = Math.sqrt(distSq);
-          const overlap = collisionRadius - dist;
-
-          // Unit direction vectors
-          const nx = dx / dist;
-          const nz = dz / dist;
-
-          // Resolve overlap instantly dividing half-push to avoid sticking together
-          const pushX = nx * overlap * 0.505;
-          const pushZ = nz * overlap * 0.505;
-
-          a.position.x -= pushX;
-          a.position.z -= pushZ;
-          b.position.x += pushX;
-          b.position.z += pushZ;
-
-          // Relative velocity difference components
-          const rvx = b.velocity.x - a.velocity.x;
-          const rvz = b.velocity.z - a.velocity.z;
-
-          // Dot product along direction normal
-          const velAlongNormal = rvx * nx + rvz * nz;
-
-          if (velAlongNormal < 0) { // they are approaching each other
-            const restitution = 0.55; // Satisfying spring bounce response
-            const impulseScalar = -(1 + restitution) * velAlongNormal * 0.5;
-
-            a.velocity.x -= impulseScalar * nx;
-            a.velocity.z -= impulseScalar * nz;
-            b.velocity.x += impulseScalar * nx;
-            b.velocity.z += impulseScalar * nz;
-
-            // Re-sync physical speeds matching impulse momentum transfers
-            a.speed = Math.sign(a.speed) * Math.sqrt(a.velocity.x * a.velocity.x + a.velocity.z * a.velocity.z);
-            b.speed = Math.sign(b.speed) * Math.sqrt(b.velocity.x * b.velocity.x + b.velocity.z * b.velocity.z);
-
-            // Momentum friction loss
-            a.speed *= 0.95;
-            b.speed *= 0.95;
-
-            // Spawn bright collision sparkles exactly at the contact midpoint
-            const contactX = a.position.x + nx * (collisionRadius * 0.5);
-            const contactY = (a.position.y + b.position.y) * 0.5 + 0.3;
-            const contactZ = a.position.z + nz * (collisionRadius * 0.5);
-            this.generateContactSparks(contactX, contactY, contactZ, nx, nz);
-          }
-        }
-      }
-    }
-  }
-
-  // Advanced AI Autopilot Logic (Overtaking, Racing Apex Line, Rubber-banding, Collision Dodge)
-  updateAICar(car: CarState, dt: number, otherCars: CarState[]) {
-    const pos3 = GamePhysicsService._vecA.set(car.position.x, car.position.y, car.position.z);
-    const trackInfo = this.trackHelper.getNearestTrackInfo(pos3, car.id);
-
-    // 1. Dynamic Lookahead Distance (Linked to speed: small on hairpins, far on straights)
-    const speedKmh = Math.abs(car.speed) * 3.6;
-    const lookaheadU = 0.016 + Math.min(0.045, (speedKmh / 300) * 0.04);
-    const targetU = (trackInfo.progress + lookaheadU) % 1.0;
-
-    const targetSplinePt = this.trackHelper.curve.getPointAt(targetU);
-    const tangentAhead = this.trackHelper.curve.getTangentAt(targetU).normalize();
-    const normalAhead = GamePhysicsService._vecC.set(-tangentAhead.z, 0, tangentAhead.x).normalize();
-
-    // Curve sharpness (bend factor)
-    const currentTangent = trackInfo.tangent;
-    const bendFactor = currentTangent.cross(tangentAhead).y;
-
-    // 2. Apex Seeking (Racing target offsets: seek curve inside shortcut)
+  /**
+   * Process autopilot guidance for competitive AI rivals and commuter traffic vehicles
+   */
+  public updateAICar(car: CarState, dt: number, otherCars: CarState[]) {
     const isTraffic = car.id.startsWith('traffic');
-    let racingLineOffset = 0;
-    
+
     if (isTraffic) {
-      // Traffic cars stay stable in their designated lanes (alternating sides based on ID)
-      const laneIndex = parseInt(car.id.split('_')[1] || '0');
-      racingLineOffset = laneIndex % 2 === 0 ? -4.5 : 4.5;
+      // 1. COMMUTER TRAFFIC PILOT DIRECTION (Smooth lanes driving + braking safety controls)
+      const commuterControls = this.trafficAIService.updateTrafficControl(car, dt, otherCars);
+      this.updateCar(car, dt, commuterControls, false);
     } else {
-      racingLineOffset = -bendFactor * (trackInfo.width * 0.35);
+      // 2. RIVALS COMPETITIVE AI autonavigation routine
+      const pos3 = GamePhysicsService._vecA.set(car.position.x, car.position.y, car.position.z);
+      const trackInfo = this.trackHelper.getNearestTrackInfo(pos3, car.id);
+
+      // Speed sensitive target lookahead progress index
+      const speedKmh = Math.abs(car.speed) * 3.6;
+      const lookaheadU = 0.016 + Math.min(0.045, (speedKmh / 300) * 0.04);
+      const targetU = (trackInfo.progress + lookaheadU) % 1.0;
+
+      const targetSplinePt = this.trackHelper.curve.getPointAt(targetU);
+      const tangentAhead = this.trackHelper.curve.getTangentAt(targetU).normalize();
+      const normalAhead = GamePhysicsService._vecC.set(-tangentAhead.z, 0, tangentAhead.x).normalize();
+
+      const currentTangent = trackInfo.tangent;
+      const bendFactor = currentTangent.cross(tangentAhead).y;
+
+      // Inside apex shortcuts targeting
+      let racingLineOffset = -bendFactor * (trackInfo.width * 0.35);
       racingLineOffset = THREE.MathUtils.clamp(racingLineOffset, -trackInfo.width * 0.38, trackInfo.width * 0.38);
-    }
 
-    // 3. Collision avoidance & Active Overtaking Lane shift
-    let evasionSideOffset = 0;
-    let decelerationWarning = false;
+      // Collision avoiding & active overtaking swerving shifts
+      let evasionSideOffset = 0;
+      let decelerationWarning = false;
 
-    otherCars.forEach(other => {
-      if (other.id === car.id) return;
+      otherCars.forEach(other => {
+        if (other.id === car.id) return;
 
-      const relX = other.position.x - car.position.x;
-      const relY = other.position.y - car.position.y;
-      const relZ = other.position.z - car.position.z;
-      const distSq = relX * relX + relZ * relZ;
+        const relX = other.position.x - car.position.x;
+        const relZ = other.position.z - car.position.z;
+        const distSq = relX * relX + relZ * relZ;
 
-      if (distSq < 576) { // inside 24m hazard detection zone
-        // Express in car's local coordinates
-        const cosAngle = Math.cos(-car.angle);
-        const sinAngle = Math.sin(-car.angle);
-        const localX = relX * cosAngle - relZ * sinAngle;
-        const localZ = relX * sinAngle + relZ * cosAngle;
+        if (distSq < 576) { // 24m proximity check
+          const cosAngle = Math.cos(-car.angle);
+          const sinAngle = Math.sin(-car.angle);
+          const localX = relX * cosAngle - relZ * sinAngle;
+          const localZ = relX * sinAngle + relZ * cosAngle;
 
-        if (localZ > 0 && localZ < 18.0) { // directly in front obstacle
-          if (Math.abs(localX) < 3.2) { // very narrow block path
-            // Select dodge offset opposite to obstacle
-            const dodgeSign = localX >= 0 ? -1 : 1;
-            evasionSideOffset += dodgeSign * 4.8 * car.aiAggression;
-
-            if (localZ < 7.5) { // danger zone deceleration trigger
-              decelerationWarning = true;
+          if (localZ > 0 && localZ < 18.0) { // threat block path
+            if (Math.abs(localX) < 3.2) {
+              const dodgeSign = localX >= 0 ? -1 : 1;
+              evasionSideOffset += dodgeSign * 4.8 * car.aiAggression;
+              if (localZ < 7.5) {
+                decelerationWarning = true;
+              }
             }
           }
         }
-      }
-    });
+      });
 
-    // Combine racing line with dynamic evasive offsets
-    const targetApexPoint = GamePhysicsService._vecB.copy(targetSplinePt);
-    const finalOffset = racingLineOffset + (isTraffic ? 0 : evasionSideOffset); // traffic doesn't weave aggressively
-    targetApexPoint.addScaledVector(normalAhead, finalOffset);
+      const targetApexPoint = GamePhysicsService._vecB.copy(targetSplinePt);
+      const finalOffset = racingLineOffset + evasionSideOffset;
+      targetApexPoint.addScaledVector(normalAhead, finalOffset);
 
-    // Dynamic autopilot steering angle target
-    const toApexX = targetApexPoint.x - car.position.x;
-    const toApexZ = targetApexPoint.z - car.position.z;
-    const targetAngle = Math.atan2(toApexX, toApexZ);
+      const toApexX = targetApexPoint.x - car.position.x;
+      const toApexZ = targetApexPoint.z - car.position.z;
+      const targetAngle = Math.atan2(toApexX, toApexZ);
 
-    let angleDiff = targetAngle - car.angle;
-    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+      let angleDiff = targetAngle - car.angle;
+      while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+      while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
 
-    const thresholdSteer = 0.055;
-    const aiControls: ControlsState = {
-      forward: !decelerationWarning,
-      backward: decelerationWarning,
-      left: angleDiff > thresholdSteer,
-      right: angleDiff < -thresholdSteer,
-      nitro: false,
-      gear: 'D',
-    };
+      const thresholdSteer = 0.055;
+      const aiControls: ControlsState = {
+        forward: !decelerationWarning,
+        backward: decelerationWarning,
+        left: angleDiff > thresholdSteer,
+        right: angleDiff < -thresholdSteer,
+        nitro: false,
+        gear: 'D',
+      };
 
-    // 4. Rubber-banding Limits [0.90 to 1.15] (Match requested competitive pacing)
-    const player = otherCars.find(c => c.id === 'player');
-    let rubberBandFactor = 1.0;
-    
-    if (player && !isTraffic) {
-      const distanceDelta = car.totalDistanceTraveled - player.totalDistanceTraveled;
+      // Competitive rubber-banding targets
+      const player = otherCars.find(c => c.id === 'player');
+      let rubberBandFactor = 1.0;
       
-      if (distanceDelta > 150) {
-        // AI is dominating -> pull back
-        rubberBandFactor = 0.90;
-      } else if (distanceDelta > 60) {
-        // AI is slightly leading
-        rubberBandFactor = 0.94;
-      } else if (distanceDelta < -150) {
-        // Player leading far -> speed up AI
-        rubberBandFactor = 1.15;
-      } else if (distanceDelta < -60) {
-        // Player leading
-        rubberBandFactor = 1.11;
+      if (player) {
+        const distanceDelta = car.totalDistanceTraveled - player.totalDistanceTraveled;
+        if (distanceDelta > 150) {
+          rubberBandFactor = 0.90;
+        } else if (distanceDelta > 60) {
+          rubberBandFactor = 0.94;
+        } else if (distanceDelta < -150) {
+          rubberBandFactor = 1.15;
+        } else if (distanceDelta < -60) {
+          rubberBandFactor = 1.11;
+        }
       }
-    }
 
-    // Dynamic hairpin / corner deceleration limits
-    const rType = this.trackHelper.getRoadTypeAt(trackInfo.progress);
-    let targetCruiseSpeed = MAX_SPEED * car.aiSpeedFactor * rubberBandFactor;
+      const roadType = this.trackHelper.getRoadTypeAt(trackInfo.progress);
+      let targetCruiseSpeed = MAX_SPEED * car.aiSpeedFactor * rubberBandFactor;
 
-    if (isTraffic) {
-      // Slower passive cruising target speed
-      targetCruiseSpeed = 19.5 + (parseInt(car.id.split('_')[1] || '0') % 3) * 3.0; // Cruise steady (70-100 km/h)
-    }
+      if (roadType === 'hairpin') {
+        targetCruiseSpeed = MAX_SPEED * 0.35;
+        if (Math.abs(angleDiff) > 0.38) {
+          aiControls.forward = false;
+          aiControls.backward = true;
+        }
+      } else if (roadType === 'normal' && Math.abs(bendFactor) > 0.08) {
+        targetCruiseSpeed = MAX_SPEED * 0.70;
+      }
 
-    if (rType === 'hairpin') {
-      targetCruiseSpeed = isTraffic ? 15.0 : MAX_SPEED * 0.35; // Heavy braking for tight curves
-      if (Math.abs(angleDiff) > 0.38) {
+      // Straight speedway nitro activates
+      if (Math.abs(angleDiff) < 0.12 && roadType === 'straight' && car.speed > 35 && car.nitroCharged > 32) {
+        aiControls.nitro = true;
+      }
+
+      if (car.speed > targetCruiseSpeed) {
         aiControls.forward = false;
-        aiControls.backward = true; // physical brake application
       }
-    } else if (rType === 'normal' && Math.abs(bendFactor) > 0.08) {
-      targetCruiseSpeed = isTraffic ? 18.0 : MAX_SPEED * 0.70; // Throttle release
-    }
 
-    // Strategic straightaway Nitro activation
-    if (!isTraffic && Math.abs(angleDiff) < 0.12 && rType === 'straight' && car.speed > 35 && car.nitroCharged > 30) {
-      aiControls.nitro = true;
-    }
-
-    if (car.speed > targetCruiseSpeed) {
-      aiControls.forward = false;
-    }
-
-    // 5. STUCK / Respawn Recovery intelligence (Respawn after 5 seconds)
-    if (Math.abs(car.speed) < 1.0) {
-      car.stuckTimer += dt;
-    } else {
-      car.stuckTimer = 0;
-    }
-
-    if (car.stuckTimer > 1.5) {
-      // Stuck: Shifting to reverse and steering away
-      aiControls.forward = false;
-      aiControls.backward = true;
-      aiControls.gear = 'R';
-      aiControls.left = angleDiff < 0;
-      aiControls.right = angleDiff > 0;
-
-      // Forced respawn on track center facing correct heading
-      if (car.stuckTimer > 5.0) {
-        car.speed = 15;
-        car.angle = Math.atan2(trackInfo.tangent.x, trackInfo.tangent.z);
-        car.position.x = trackInfo.nearestPoint.x;
-        car.position.y = trackInfo.nearestPoint.y;
-        car.position.z = trackInfo.nearestPoint.z;
-        car.velocity.x = trackInfo.tangent.x * 5;
-        car.velocity.z = trackInfo.tangent.z * 5;
+      // Stuck recovery triggers
+      if (Math.abs(car.speed) < 1.0) {
+        car.stuckTimer += dt;
+      } else {
         car.stuckTimer = 0;
       }
-    }
 
-    this.updateCar(car, dt, aiControls, false);
+      if (car.stuckTimer > 1.5) {
+        aiControls.forward = false;
+        aiControls.backward = true;
+        aiControls.gear = 'R';
+        aiControls.left = angleDiff < 0;
+        aiControls.right = angleDiff > 0;
+
+        if (car.stuckTimer > 5.0) {
+          car.speed = 15;
+          car.angle = Math.atan2(trackInfo.tangent.x, trackInfo.tangent.z);
+          car.position.x = trackInfo.nearestPoint.x;
+          car.position.y = trackInfo.nearestPoint.y;
+          car.position.z = trackInfo.nearestPoint.z;
+          car.velocity.x = trackInfo.tangent.x * 5;
+          car.velocity.z = trackInfo.tangent.z * 5;
+          car.stuckTimer = 0;
+        }
+      }
+
+      this.updateCar(car, dt, aiControls, false);
+    }
   }
 
-  // Live standings leaderboard evaluator
-  evaluatePositionsRanks(cars: CarState[]) {
-    // Resolve pairwise car-to-car elastic responses first
+  /**
+   * Sorts stand-by leaderboards mapping
+   */
+  public evaluatePositionsRanks(cars: CarState[]) {
     this.resolveCarCollisions(cars);
 
     const sorted = [...cars].sort((a, b) => {

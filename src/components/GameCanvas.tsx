@@ -9,6 +9,12 @@ import { particleSystem } from '../world/particleSystem';
 import { lodManager } from '../world/lodManager';
 import { terrainManager } from '../world/terrainManager';
 
+// Dynamic modular systems integration
+import { SuspensionSystem } from '../utils/suspension';
+import { WheelSystem } from '../utils/wheelSystem';
+import { CameraController } from '../utils/cameraController';
+import { CarAudioSystem } from '../utils/carAudio';
+
 // ------------------------------------------------------------
 // HIGH-FI DYNAMIC SYNTHESIZED HYPERCAR ENGINE SOUND SYSTEM
 // ------------------------------------------------------------
@@ -292,6 +298,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   const onTickRef = useRef<(updatedCars: CarState[]) => void>(onTick);
   
   const soundSystemRef = useRef<EngineSoundSystem | null>(null);
+  const cameraControllerRef = useRef<CameraController | null>(null);
+  const carAudioSystemRef = useRef<CarAudioSystem | null>(null);
   const soundEnabledRef = useRef<boolean>(soundEnabled);
 
   const timeOfDayRef = useRef<'morning' | 'noon' | 'sunset' | 'night'>(timeOfDay);
@@ -674,6 +682,17 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             }
           }
           const rotDelta = (wheelRotationSpeed * elapsedSec) / 0.38;
+
+          const suspensionTravel = 0.08;
+
+          // steerOffset calculation for both GLTF wheels & procedural fallback wheels
+          let steerOffset = 0;
+          if (c.id === 'player') {
+            const steerVal = c.steerValue !== undefined ? c.steerValue : (controlsRef.current.steerValue !== undefined ? controlsRef.current.steerValue : (controlsRef.current.left ? 1 : (controlsRef.current.right ? -1 : 0)));
+            steerOffset = steerVal * 0.36;
+          } else {
+            steerOffset = THREE.MathUtils.clamp((c.steerValue !== undefined ? c.steerValue : c.angularVelocity * 0.4), -0.36, 0.36);
+          }
           
           const hasGltf = carGroup.getObjectByName('gltf_car_model');
           if (hasGltf) {
@@ -683,35 +702,64 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             if (spinners) {
               spinners.forEach(s => { s.visible = false; });
             }
-            // Spin the real GLB wheels
-            if ((carGroup as any).glbWheels) {
-              (carGroup as any).glbWheels.forEach((w: THREE.Object3D) => {
-                w.rotateX(rotDelta);
-              });
+
+            const wheels = carGroup.userData.wheels;
+            const gltfPivots = carGroup.userData.pivots;
+
+            // Roll & Pitch lerps as requested:
+            carGroup.rotation.z = THREE.MathUtils.lerp(
+              carGroup.rotation.z,
+              -c.angularVelocity * 0.022 * speedRatio,
+              10 * elapsedSec
+            );
+            
+            carGroup.rotation.x = THREE.MathUtils.lerp(
+              carGroup.rotation.x,
+              pitchTarget,
+              8 * elapsedSec
+            );
+
+            // Wheel Spin:
+            // All wheels rotate: wheel.rotation.x += rotDelta;
+            if (wheels) {
+              if (wheels.frontLeft) wheels.frontLeft.rotation.x += rotDelta;
+              if (wheels.frontRight) wheels.frontRight.rotation.x += rotDelta;
+              if (wheels.rearLeft) wheels.rearLeft.rotation.x += rotDelta;
+              if (wheels.rearRight) wheels.rearRight.rotation.x += rotDelta;
+            }
+
+            // Steering pivots update:
+            if (gltfPivots) {
+              if (gltfPivots.frontLeftPivot) {
+                gltfPivots.frontLeftPivot.rotation.y = THREE.MathUtils.lerp(
+                  gltfPivots.frontLeftPivot.rotation.y,
+                  steerOffset,
+                  0.18
+                );
+              }
+              if (gltfPivots.frontRightPivot) {
+                gltfPivots.frontRightPivot.rotation.y = THREE.MathUtils.lerp(
+                  gltfPivots.frontRightPivot.rotation.y,
+                  steerOffset,
+                  0.18
+                );
+              }
             }
           } else {
+            // Fallback procedural wheels
             if (spinners) {
               spinners.forEach(s => { s.rotation.x += rotDelta; });
             }
-          }
-
-          // steering pivot angles
-          if (pivots && pivots.length >= 2) {
-            let steerOffset = 0;
-            if (c.id === 'player') {
-              const steerVal = c.steerValue !== undefined ? c.steerValue : (controlsRef.current.steerValue !== undefined ? controlsRef.current.steerValue : (controlsRef.current.left ? 1 : (controlsRef.current.right ? -1 : 0)));
-              steerOffset = steerVal * 0.36;
-            } else {
-              steerOffset = THREE.MathUtils.clamp((c.steerValue !== undefined ? c.steerValue : c.angularVelocity * 0.4), -0.36, 0.36);
+            if (pivots && pivots.length >= 2) {
+              pivots[0].rotation.y = THREE.MathUtils.lerp(pivots[0].rotation.y, steerOffset, 0.18);
+              pivots[1].rotation.y = THREE.MathUtils.lerp(pivots[1].rotation.y, steerOffset, 0.18);
             }
-            pivots[0].rotation.y = THREE.MathUtils.lerp(pivots[0].rotation.y, steerOffset, 0.18);
-            pivots[1].rotation.y = THREE.MathUtils.lerp(pivots[1].rotation.y, steerOffset, 0.18);
           }
 
           // GLTF dynamic supercar models hot swap
           if (gltfModelCache.isLoaded) {
-            const hasGltf = carGroup.getObjectByName('gltf_car_model');
-            if (hasGltf) {
+            const hasGltfModel = carGroup.getObjectByName('gltf_car_model');
+            if (hasGltfModel) {
               if (c.id === 'player') {
                 (window as any).playerCarAddedToScene = true;
               }
@@ -727,20 +775,18 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                 });
                 const clonedModel = modelSource.clone();
 
-                // 1. Compute its bounding box.
+                // 1. Compute its bounding box and center.
                 const box = new THREE.Box3().setFromObject(clonedModel);
                 const size = box.getSize(new THREE.Vector3());
-                const center = box.getCenter(new THREE.Vector3());
+                const center = new THREE.Vector3();
+                box.getCenter(center);
 
                 clonedModel.userData.boundingBox = box;
                 clonedModel.userData.height = size.y;
 
-                // Move the car so its bottom sits on the ground:
-                clonedModel.position.y -= box.min.y;
-
-                // Center the model:
                 clonedModel.position.x -= center.x;
                 clonedModel.position.z -= center.z;
+                clonedModel.position.y -= box.min.y;
 
                 console.log(
                   "Car height:",
@@ -753,17 +799,102 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
                 clonedModel.name = 'gltf_car_model';
 
-                // Automatically detect wheels:
-                if (!(carGroup as any).glbWheels) {
-                  (carGroup as any).glbWheels = [];
-                }
+                // Ensure parent container is loaded so world positions are computed cleanly relative to car root
+                carGroup.add(clonedModel);
+
+                // Use updateMatrixWorld on clonedModel so local coordinates mapping works flawlessly
+                clonedModel.updateMatrixWorld(true);
+
+                // 2. Automatically detect wheels inside clonedModel (by name containing wheel, tire, rim)
+                const detectedWheels: THREE.Object3D[] = [];
                 clonedModel.traverse((node) => {
-                  if (node.name.toLowerCase().includes("wheel")) {
-                    (carGroup as any).glbWheels.push(node);
+                  const nameLower = node.name.toLowerCase();
+                  const isMatch = nameLower.includes("wheel") || nameLower.includes("tire") || nameLower.includes("rim");
+                  if (isMatch) {
+                    // Prevent nested / duplicated nodes (like tyre meshes under wheel group both being matched)
+                    let hasAncestorMatched = false;
+                    let parent = node.parent;
+                    while (parent) {
+                      if (detectedWheels.includes(parent)) {
+                        hasAncestorMatched = true;
+                        break;
+                      }
+                      parent = parent.parent;
+                    }
+                    if (!hasAncestorMatched) {
+                      detectedWheels.push(node);
+                    }
                   }
                 });
 
-                // 4. Disable procedural wheels when a GLB vehicle exists.
+                // 3. Classify wheels based on local space relative to clonedModel
+                let frontLeft: THREE.Object3D | null = null;
+                let frontRight: THREE.Object3D | null = null;
+                let rearLeft: THREE.Object3D | null = null;
+                let rearRight: THREE.Object3D | null = null;
+
+                detectedWheels.forEach((wheel) => {
+                  const localPos = new THREE.Vector3();
+                  wheel.getWorldPosition(localPos);
+                  clonedModel.worldToLocal(localPos);
+
+                  const isFront = localPos.z > 0;
+                  const isLeft = localPos.x > 0;
+
+                  if (isFront) {
+                    if (isLeft) {
+                      frontLeft = wheel;
+                    } else {
+                      frontRight = wheel;
+                    }
+                  } else {
+                    if (isLeft) {
+                      rearLeft = wheel;
+                    } else {
+                      rearRight = wheel;
+                    }
+                  }
+                });
+
+                carGroup.userData.wheels = {
+                  frontLeft,
+                  frontRight,
+                  rearLeft,
+                  rearRight
+                };
+
+                // 4. Create steering pivots and attach front wheels safely
+                let frontLeftPivot: THREE.Group | null = null;
+                let frontRightPivot: THREE.Group | null = null;
+
+                if (frontLeft) {
+                  frontLeftPivot = new THREE.Group();
+                  frontLeftPivot.name = "frontLeftPivot";
+                  frontLeftPivot.position.copy(frontLeft.position);
+                  frontLeftPivot.rotation.copy(frontLeft.rotation);
+                  frontLeft.parent?.add(frontLeftPivot);
+                  frontLeft.position.set(0, 0, 0);
+                  frontLeft.rotation.set(0, 0, 0);
+                  frontLeftPivot.add(frontLeft);
+                }
+
+                if (frontRight) {
+                  frontRightPivot = new THREE.Group();
+                  frontRightPivot.name = "frontRightPivot";
+                  frontRightPivot.position.copy(frontRight.position);
+                  frontRightPivot.rotation.copy(frontRight.rotation);
+                  frontRight.parent?.add(frontRightPivot);
+                  frontRight.position.set(0, 0, 0);
+                  frontRight.rotation.set(0, 0, 0);
+                  frontRightPivot.add(frontRight);
+                }
+
+                carGroup.userData.pivots = {
+                  frontLeftPivot,
+                  frontRightPivot
+                };
+
+                // Disable procedural wheels when GLB vehicle exists
                 if (pivots) {
                   pivots.forEach(p => { p.visible = false; });
                 }
@@ -795,7 +926,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                     });
                   }
                 });
-                carGroup.add(clonedModel);
+
                 if (c.id === 'player') {
                   (window as any).playerCarAddedToScene = true;
                 }
@@ -824,15 +955,17 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
           // Trigger simulated engine audio pitching
           if (c.id === 'player') {
-            if (soundSystemRef.current) {
-              soundSystemRef.current.setSpeed(
-                c.speed,
-                c.isNitroActive,
-                isPausedRef.current,
-                soundEnabledRef.current,
-                gameStateRef.current
-              );
+            if (!carAudioSystemRef.current) {
+              carAudioSystemRef.current = new CarAudioSystem();
             }
+            carAudioSystemRef.current.update(
+              c.speed,
+              c.isNitroActive,
+              c.isDrifting,
+              isPausedRef.current,
+              soundEnabledRef.current,
+              gameStateRef.current === 'racing' || gameStateRef.current === 'countdown'
+            );
           }
 
           // dynamic exhaust nitro cones flares
@@ -1159,6 +1292,10 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       carRightTailTrails.forEach(t => t.dispose());
       carLeftExhaustTrails.forEach(t => t.dispose());
       carRightExhaustTrails.forEach(t => t.dispose());
+
+      if (carAudioSystemRef.current) {
+        carAudioSystemRef.current.dispose();
+      }
     };
   }, [physicsService, trackHelper]);
 
