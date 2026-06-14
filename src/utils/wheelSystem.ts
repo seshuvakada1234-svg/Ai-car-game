@@ -4,285 +4,162 @@ import { SuspensionState } from './suspension';
 
 export interface WheelAssembly {
   node: THREE.Object3D;
+  pivot: THREE.Group;
+  hub: THREE.Group;
   initialLocalPos: THREE.Vector3;
-  initialRotation: THREE.Euler;
-  wheelspinAngle: number;
+  originalQuaternion: THREE.Quaternion;
+  originalScale: THREE.Vector3;
 }
 
 export class WheelSystem {
-  public frontLeftWheel: WheelAssembly | null = null;
-  public frontRightWheel: WheelAssembly | null = null;
-  public rearLeftWheel: WheelAssembly | null = null;
-  public rearRightWheel: WheelAssembly | null = null;
+  public frontLeft: WheelAssembly | null = null;
+  public frontRight: WheelAssembly | null = null;
+  public rearLeft: WheelAssembly | null = null;
+  public rearRight: WheelAssembly | null = null;
 
-  // Fallback wheel positions for models without proper naming
-  private static readonly FALLBACK_POSITIONS = {
-    frontLeft: new THREE.Vector3(0.95, 0.38, 1.15),
-    frontRight: new THREE.Vector3(-0.95, 0.38, 1.15),
-    rearLeft: new THREE.Vector3(1.0, 0.38, -1.2),
-    rearRight: new THREE.Vector3(-1.0, 0.38, -1.2)
-  };
+  public wheelspinAngle: number = 0;
 
-  // Wheel radius for spin calculations
-  private static readonly WHEEL_RADIUS = 0.38;
-
-  // Suspension constants
-  private static readonly MAX_TRAVEL = 0.15;
-  private static readonly WHEEL_TRAVEL_Y = 0.10;
-
-  constructor(wheels: THREE.Object3D[]) {
-    this.detectAndAssignWheels(wheels);
+  constructor(wheels: THREE.Object3D[], modelRoot: THREE.Object3D) {
+    if (!wheels || wheels.length === 0) return;
+    this.detectAndAssignWheels(wheels, modelRoot);
   }
 
   /**
-   * Detects wheel meshes by name matching and classifies by Z-coordinate sorting
-   * 
-   * Detection pattern: names containing:
-   * - wheel, tire, rim, pneu, col_w (case-insensitive)
-   * 
-   * Classification:
-   * 1. Collect all matching wheels
-   * 2. Sort by Z coordinate (higher Z = front)
-   * 3. Split into front and rear pairs
-   * 4. Sort each pair by X coordinate
-   * 5. Assign: frontLeft, frontRight, rearLeft, rearRight
-   * 6. Store initial rotation to preserve GLTF orientation
+   * Automatically detect and classify each 3D wheel model node based on its spatial quadrant position
    */
-  private detectAndAssignWheels(wheels: THREE.Object3D[]): void {
-    if (!wheels || wheels.length === 0) {
-      this.assignFallbackWheels();
-      return;
-    }
+  private detectAndAssignWheels(wheels: THREE.Object3D[], modelRoot: THREE.Object3D): void {
+    let flNode: THREE.Object3D | null = null;
+    let frNode: THREE.Object3D | null = null;
+    let rlNode: THREE.Object3D | null = null;
+    let rrNode: THREE.Object3D | null = null;
 
-    // Collect wheels that match name patterns
-    const detectedWheels: THREE.Object3D[] = [];
-    const wheelPatterns = ['wheel', 'tire', 'rim', 'pneu', 'col_w'];
+    wheels.forEach((wheel) => {
+      const localPos = new THREE.Vector3();
+      wheel.getWorldPosition(localPos);
+      modelRoot.worldToLocal(localPos);
 
-    wheels.forEach((node) => {
-      const nameLower = node.name.toLowerCase();
-      const isWheelMatch = wheelPatterns.some(pattern => nameLower.includes(pattern));
-      
-      if (isWheelMatch) {
-        detectedWheels.push(node);
+      const isFront = localPos.z > 0;
+      const isLeft = localPos.x > 0;
+
+      if (isFront) {
+        if (isLeft) flNode = wheel;
+        else frNode = wheel;
+      } else {
+        if (isLeft) rlNode = wheel;
+        else rrNode = wheel;
       }
     });
 
-    if (detectedWheels.length === 0) {
-      this.assignFallbackWheels();
-      return;
-    }
-
-    // Sort wheels by Z coordinate (higher Z = front wheels)
-    detectedWheels.sort((a, b) => (b.position.z || 0) - (a.position.z || 0));
-
-    // Split into front and rear pairs
-    const frontWheels = detectedWheels.slice(0, 2);
-    const rearWheels = detectedWheels.slice(2, 4);
-
-    // Process front wheels - sort by X (positive X = left in local space)
-    if (frontWheels.length >= 2) {
-      frontWheels.sort((a, b) => (b.position.x || 0) - (a.position.x || 0));
-      this.frontLeftWheel = this.createWheelAssembly(frontWheels[0]);
-      this.frontRightWheel = this.createWheelAssembly(frontWheels[1]);
-    } else if (frontWheels.length === 1) {
-      this.frontLeftWheel = this.createWheelAssembly(frontWheels[0]);
-    }
-
-    // Process rear wheels - sort by X (positive X = left in local space)
-    if (rearWheels.length >= 2) {
-      rearWheels.sort((a, b) => (b.position.x || 0) - (a.position.x || 0));
-      this.rearLeftWheel = this.createWheelAssembly(rearWheels[0]);
-      this.rearRightWheel = this.createWheelAssembly(rearWheels[1]);
-    } else if (rearWheels.length === 1) {
-      this.rearLeftWheel = this.createWheelAssembly(rearWheels[0]);
-    }
-
-    // Fill remaining slots with fallbacks
-    if (!this.frontLeftWheel) {
-      this.frontLeftWheel = this.createFallbackWheelAssembly(WheelSystem.FALLBACK_POSITIONS.frontLeft);
-    }
-    if (!this.frontRightWheel) {
-      this.frontRightWheel = this.createFallbackWheelAssembly(WheelSystem.FALLBACK_POSITIONS.frontRight);
-    }
-    if (!this.rearLeftWheel) {
-      this.rearLeftWheel = this.createFallbackWheelAssembly(WheelSystem.FALLBACK_POSITIONS.rearLeft);
-    }
-    if (!this.rearRightWheel) {
-      this.rearRightWheel = this.createFallbackWheelAssembly(WheelSystem.FALLBACK_POSITIONS.rearRight);
-    }
+    // Setup each quadrant as a nested Pivot-Hub-Mesh assembly
+    this.frontLeft = this.setupAssembly(flNode, "frontLeft");
+    this.frontRight = this.setupAssembly(frNode, "frontRight");
+    this.rearLeft = this.setupAssembly(rlNode, "rearLeft");
+    this.rearRight = this.setupAssembly(rrNode, "rearRight");
   }
 
-  /**
-   * Creates a wheel assembly from a detected wheel node
-   * Stores initial rotation to preserve GLTF orientation
-   */
-  private createWheelAssembly(node: THREE.Object3D): WheelAssembly {
+  private setupAssembly(node: THREE.Object3D | null, name: string): WheelAssembly | null {
+    if (!node) return null;
+
+    const parent = node.parent;
+    if (!parent) return null;
+
+    // Capture the original local transform details
+    const initialLocalPos = node.position.clone();
+    const originalQuaternion = node.quaternion.clone();
+    const originalScale = node.scale.clone();
+
+    // Create the Pivot (handles steering yaw on local Y-axis and suspension vertical travel Y)
+    const pivot = new THREE.Group();
+    pivot.name = `${name}Pivot`;
+    pivot.position.copy(initialLocalPos);
+    pivot.quaternion.set(0, 0, 0, 1);
+    
+    parent.add(pivot);
+
+    // Create the Hub (handles dynamic wheelspin roll on local X-axis)
+    const hub = new THREE.Group();
+    hub.name = `${name}Hub`;
+    hub.position.set(0, 0, 0);
+    hub.quaternion.set(0, 0, 0, 1);
+
+    pivot.add(hub);
+
+    // Reparent and preserve mesh
+    node.position.set(0, 0, 0);
+    node.quaternion.copy(originalQuaternion);
+    node.scale.copy(originalScale);
+    hub.add(node);
+
     return {
       node,
-      initialLocalPos: node.position.clone(),
-      initialRotation: node.rotation.clone(),
-      wheelspinAngle: 0
+      pivot,
+      hub,
+      initialLocalPos,
+      originalQuaternion,
+      originalScale
     };
   }
 
   /**
-   * Assigns fallback wheel positions when detection fails
-   */
-  private assignFallbackWheels(): void {
-    this.frontLeftWheel = this.createFallbackWheelAssembly(WheelSystem.FALLBACK_POSITIONS.frontLeft);
-    this.frontRightWheel = this.createFallbackWheelAssembly(WheelSystem.FALLBACK_POSITIONS.frontRight);
-    this.rearLeftWheel = this.createFallbackWheelAssembly(WheelSystem.FALLBACK_POSITIONS.rearLeft);
-    this.rearRightWheel = this.createFallbackWheelAssembly(WheelSystem.FALLBACK_POSITIONS.rearRight);
-  }
-
-  /**
-   * Creates a fallback wheel assembly with a dummy node
-   */
-  private createFallbackWheelAssembly(position: THREE.Vector3): WheelAssembly {
-    const dummyGroup = new THREE.Group();
-    dummyGroup.position.copy(position);
-    return {
-      node: dummyGroup,
-      initialLocalPos: position.clone(),
-      initialRotation: new THREE.Euler(),
-      wheelspinAngle: 0
-    };
-  }
-
-  /**
-   * EXCLUSIVE wheel control: spin, steering, and suspension travel.
-   * 
-   * Only this system updates wheel transforms.
-   * No other system (suspension.ts, gamePhysics.ts, GameCanvas.tsx) should modify wheels.
-   * 
-   * Uses spring-damper suspension with:
-   * - MAX_TRAVEL = 0.15m
-   * - wheelTravelY = 0.10m
-   * - No teleporting or floating
-   * 
-   * CRITICAL RULES:
-   * 1. Preserve original wheel axis orientation from GLTF
-   * 2. Apply rotations additively (rotateX, rotateY) - never overwrite
-   * 3. Lock X and Z positions to initial values
-   * 4. Smooth Y-axis suspension with clamped lerp
-   * 5. Front wheels only steer (rotateY)
-   * 6. Rear wheels never steer
+   * Performs the high-precision steering, wheelspin, and suspension translation updates
+   * using decoupled pivots and hubs with stable, gimbal-lock-free quaternions.
    */
   public update(
     car: CarState,
-    steerValue: number,
-    suspension: SuspensionState,
+    steerOffset: number,
+    suspState: SuspensionState,
     elapsedSec: number
   ): void {
+    const wheelRadius = 0.38; // standard physical tire radius
+    const maxTravelY = 0.10;  // maximum suspension travel range in meters
+    const maxSteerAngle = 0.36; // maximum turning steering limit
+
+    // 1. Calculate wheelspin pace based on actual vehicle speeds
     const speed = car.speed;
-
-    // 1. Calculate wheel spin angle change
-    // wheel_rotation_speed = velocity / radius = (dt * speed / radius)
-    let spinDelta = (speed * elapsedSec) / WheelSystem.WHEEL_RADIUS;
+    let wheelRotationSpeed = Math.abs(speed);
     
-    // Simulate burnout wheelspin during hard acceleration launch
-    const isAcceleratingHard = car.id === 'player' && car.speed < 15 && Math.abs(steerValue) < 0.1;
-    if (isAcceleratingHard && speed > 1) {
-      spinDelta = (35 * elapsedSec) / WheelSystem.WHEEL_RADIUS;
+    // Low speed/brake wheelspin smoothing
+    if (Math.abs(speed) < 1.0) {
+      wheelRotationSpeed = 0.0;
     }
 
-    // 2. Front wheel steering angle
-    const maxSteerAngle = 0.42; // ~24 degrees of real front wheel lock
-    const steerAngle = steerValue * maxSteerAngle;
+    const rotDelta = (wheelRotationSpeed * elapsedSec) / wheelRadius;
+    this.wheelspinAngle += rotDelta;
+    this.wheelspinAngle %= Math.PI * 2;
 
-    // 3. Maximum suspension travel - clamped lerp factor to prevent teleporting
-    const suspensionLerpAlpha = Math.min(1.0, elapsedSec * 10.0);
+    const qSteer = new THREE.Quaternion();
+    const qSpin = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), this.wheelspinAngle);
+    const qZero = new THREE.Quaternion().set(0, 0, 0, 1);
 
-    // 4. Update each wheel assembly - EXCLUSIVELY
-    // Front wheels can steer
-    this.updateWheelAssembly(
-      this.frontLeftWheel,
-      suspension.frontLeft,
-      steerAngle,
-      spinDelta,
-      suspensionLerpAlpha,
-      true  // canSteer
-    );
-    this.updateWheelAssembly(
-      this.frontRightWheel,
-      suspension.frontRight,
-      steerAngle,
-      spinDelta,
-      suspensionLerpAlpha,
-      true  // canSteer
-    );
+    const updateAssembly = (
+      assembly: WheelAssembly | null,
+      compressionY: number,
+      isFront: boolean
+    ) => {
+      if (!assembly) return;
 
-    // Rear wheels never steer
-    this.updateWheelAssembly(
-      this.rearLeftWheel,
-      suspension.rearLeft,
-      0,
-      spinDelta,
-      suspensionLerpAlpha,
-      false  // canSteer
-    );
-    this.updateWheelAssembly(
-      this.rearRightWheel,
-      suspension.rearRight,
-      0,
-      spinDelta,
-      suspensionLerpAlpha,
-      false  // canSteer
-    );
-  }
+      // Vertical suspension slide with rigid structural X/Z lock to prevent visual detachments
+      const targetY = assembly.initialLocalPos.y + (compressionY * maxTravelY);
+      assembly.pivot.position.y = THREE.MathUtils.lerp(assembly.pivot.position.y, targetY, 15 * elapsedSec);
+      assembly.pivot.position.x = assembly.initialLocalPos.x;
+      assembly.pivot.position.z = assembly.initialLocalPos.z;
 
-  /**
-   * Updates a single wheel assembly with spin, steering, and suspension travel
-   * 
-   * CRITICAL: Preserve original rotation orientation from GLTF
-   * CRITICAL: Apply rotations additively using rotateX/rotateY
-   * CRITICAL: Lock X,Z to initial positions - only modify Y for suspension
-   * CRITICAL: Use clamped lerp for suspension to prevent teleporting
-   */
-  private updateWheelAssembly(
-    assembly: WheelAssembly | null,
-    compression: number,
-    steerAngle: number,
-    spinDelta: number,
-    suspensionLerpAlpha: number,
-    canSteer: boolean
-  ): void {
-    if (!assembly || !assembly.node) return;
+      // Handle Steering Yaw (Decoupled on Pivot level)
+      if (isFront) {
+        const steerYaw = steerOffset * maxSteerAngle;
+        qSteer.setFromAxisAngle(new THREE.Vector3(0, 1, 0), steerYaw);
+        assembly.pivot.quaternion.copy(qSteer);
+      } else {
+        assembly.pivot.quaternion.copy(qZero);
+      }
 
-    // 1. Update wheel spin accumulator
-    assembly.wheelspinAngle += spinDelta;
-    
-    // Keep wheel rotation normalized to prevent numerical errors
-    while (assembly.wheelspinAngle > Math.PI * 2) assembly.wheelspinAngle -= Math.PI * 2;
-    while (assembly.wheelspinAngle < 0) assembly.wheelspinAngle += Math.PI * 2;
+      // Handle Wheelspin Roll (Decoupled on Hub level)
+      assembly.hub.quaternion.copy(qSpin);
+    };
 
-    // 2. Restore initial orientation from GLTF to preserve axis alignment
-    assembly.node.rotation.copy(assembly.initialRotation);
-
-    // 3. Apply rotations additively (never overwrite)
-    // Spin around X-axis (pitch - actual wheel rotation)
-    assembly.node.rotateX(assembly.wheelspinAngle);
-    
-    // Steering around Y-axis (yaw - only for front wheels)
-    if (canSteer) {
-      assembly.node.rotateY(steerAngle);
-    }
-
-    // 4. Apply vertical suspension travel with clamped lerp
-    // Clamp compression to [0, 1]
-    const clampedCompression = Math.max(0, Math.min(1, compression));
-    const targetDisplacementY = assembly.initialLocalPos.y + (clampedCompression * WheelSystem.WHEEL_TRAVEL_Y);
-    
-    // Smooth suspension movement with clamped alpha to prevent teleporting
-    assembly.node.position.y = THREE.MathUtils.lerp(
-      assembly.node.position.y,
-      targetDisplacementY,
-      suspensionLerpAlpha
-    );
-
-    // 5. Lock X and Z coordinates to initial values
-    // This prevents wheel drifting and ensures consistent track width and wheelbase
-    assembly.node.position.x = assembly.initialLocalPos.x;
-    assembly.node.position.z = assembly.initialLocalPos.z;
+    updateAssembly(this.frontLeft, suspState ? suspState.frontLeft : 0, true);
+    updateAssembly(this.frontRight, suspState ? suspState.frontRight : 0, true);
+    updateAssembly(this.rearLeft, suspState ? suspState.rearLeft : 0, false);
+    updateAssembly(this.rearRight, suspState ? suspState.rearRight : 0, false);
   }
 }

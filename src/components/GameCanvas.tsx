@@ -703,8 +703,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
               spinners.forEach(s => { s.visible = false; });
             }
 
-            const wheels = carGroup.userData.wheels;
-            const gltfPivots = carGroup.userData.pivots;
+            const wheelSystem = carGroup.userData.wheelSystem;
 
             // Roll & Pitch lerps as requested:
             carGroup.rotation.z = THREE.MathUtils.lerp(
@@ -736,73 +735,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
               carGroup.rotation.x
             );
 
-            // Wheel Spin using accumulated angle tracking to prevent drifts/gimbal errors
-            if (wheels) {
-              if (wheels.wheelspinAngle === undefined) {
-                wheels.wheelspinAngle = 0;
-              }
-              // Accumulate spin delta based on actual speed
-              wheels.wheelspinAngle += rotDelta;
-              // Keep angle normalized within [0, 2PI]
-              wheels.wheelspinAngle %= Math.PI * 2;
-
-              if (wheels.frontLeft) wheels.frontLeft.rotation.x = wheels.wheelspinAngle;
-              if (wheels.frontRight) wheels.frontRight.rotation.x = wheels.wheelspinAngle;
-              if (wheels.rearLeft) wheels.rearLeft.rotation.x = wheels.wheelspinAngle;
-              if (wheels.rearRight) wheels.rearRight.rotation.x = wheels.wheelspinAngle;
-            }
-
-            // Steering pivots update + lock suspension spatial coordinate offsets
-            const maxTravelY = 0.10; // meters of maximum wheel travel
-
-            if (gltfPivots) {
-              // Front Left Pivot: Steer and Suspension Y Offset
-              if (gltfPivots.frontLeftPivot && wheels && wheels.flInitialPos) {
-                gltfPivots.frontLeftPivot.rotation.y = THREE.MathUtils.lerp(
-                  gltfPivots.frontLeftPivot.rotation.y,
-                  steerOffset,
-                  0.18
-                );
-                const comp = sState ? sState.frontLeft : 0;
-                const targetY = wheels.flInitialPos.y + (comp * maxTravelY);
-                // Smoothly slide Y and rigidly lock X and Z coordinates
-                gltfPivots.frontLeftPivot.position.y = THREE.MathUtils.lerp(gltfPivots.frontLeftPivot.position.y, targetY, 15 * elapsedSec);
-                gltfPivots.frontLeftPivot.position.x = wheels.flInitialPos.x;
-                gltfPivots.frontLeftPivot.position.z = wheels.flInitialPos.z;
-              }
-
-              // Front Right Pivot: Steer and Suspension Y Offset
-              if (gltfPivots.frontRightPivot && wheels && wheels.frInitialPos) {
-                gltfPivots.frontRightPivot.rotation.y = THREE.MathUtils.lerp(
-                  gltfPivots.frontRightPivot.rotation.y,
-                  steerOffset,
-                  0.18
-                );
-                const comp = sState ? sState.frontRight : 0;
-                const targetY = wheels.frInitialPos.y + (comp * maxTravelY);
-                // Smoothly slide Y and rigidly lock X and Z coordinates
-                gltfPivots.frontRightPivot.position.y = THREE.MathUtils.lerp(gltfPivots.frontRightPivot.position.y, targetY, 15 * elapsedSec);
-                gltfPivots.frontRightPivot.position.x = wheels.frInitialPos.x;
-                gltfPivots.frontRightPivot.position.z = wheels.frInitialPos.z;
-              }
-            }
-
-            // Rear Wheels: Only dynamic vertical Y-displacement, X & Z rigidly locked
-            if (wheels) {
-              if (wheels.rearLeft && wheels.rlInitialPos) {
-                const comp = sState ? sState.rearLeft : 0;
-                const targetY = wheels.rlInitialPos.y + (comp * maxTravelY);
-                wheels.rearLeft.position.y = THREE.MathUtils.lerp(wheels.rearLeft.position.y, targetY, 15 * elapsedSec);
-                wheels.rearLeft.position.x = wheels.rlInitialPos.x;
-                wheels.rearLeft.position.z = wheels.rlInitialPos.z;
-              }
-              if (wheels.rearRight && wheels.rrInitialPos) {
-                const comp = sState ? sState.rearRight : 0;
-                const targetY = wheels.rrInitialPos.y + (comp * maxTravelY);
-                wheels.rearRight.position.y = THREE.MathUtils.lerp(wheels.rearRight.position.y, targetY, 15 * elapsedSec);
-                wheels.rearRight.position.x = wheels.rrInitialPos.x;
-                wheels.rearRight.position.z = wheels.rrInitialPos.z;
-              }
+            if (wheelSystem) {
+              const normSteer = steerOffset / 0.36;
+              wheelSystem.update(c, normSteer, sState, elapsedSec);
             }
           } else {
             // Fallback procedural wheels
@@ -886,82 +821,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                   }
                 });
 
-                // 3. Classify wheels based on local space relative to clonedModel
-                let frontLeft: THREE.Object3D | null = null;
-                let frontRight: THREE.Object3D | null = null;
-                let rearLeft: THREE.Object3D | null = null;
-                let rearRight: THREE.Object3D | null = null;
-
-                detectedWheels.forEach((wheel) => {
-                  const localPos = new THREE.Vector3();
-                  wheel.getWorldPosition(localPos);
-                  clonedModel.worldToLocal(localPos);
-
-                  const isFront = localPos.z > 0;
-                  const isLeft = localPos.x > 0;
-
-                  if (isFront) {
-                    if (isLeft) {
-                      frontLeft = wheel;
-                    } else {
-                      frontRight = wheel;
-                    }
-                  } else {
-                    if (isLeft) {
-                      rearLeft = wheel;
-                    } else {
-                      rearRight = wheel;
-                    }
-                  }
-                });
-
-                const flInitialPos = frontLeft ? (frontLeft as THREE.Object3D).position.clone() : new THREE.Vector3();
-                const frInitialPos = frontRight ? (frontRight as THREE.Object3D).position.clone() : new THREE.Vector3();
-                const rlInitialPos = rearLeft ? (rearLeft as THREE.Object3D).position.clone() : new THREE.Vector3();
-                const rrInitialPos = rearRight ? (rearRight as THREE.Object3D).position.clone() : new THREE.Vector3();
-
-                carGroup.userData.wheels = {
-                  frontLeft,
-                  frontRight,
-                  rearLeft,
-                  rearRight,
-                  flInitialPos,
-                  frInitialPos,
-                  rlInitialPos,
-                  rrInitialPos,
-                  wheelspinAngle: 0
-                };
-
-                // 4. Create steering pivots and attach front wheels safely
-                let frontLeftPivot: THREE.Group | null = null;
-                let frontRightPivot: THREE.Group | null = null;
-
-                if (frontLeft) {
-                  frontLeftPivot = new THREE.Group();
-                  frontLeftPivot.name = "frontLeftPivot";
-                  frontLeftPivot.position.copy(frontLeft.position);
-                  frontLeftPivot.rotation.copy(frontLeft.rotation);
-                  frontLeft.parent?.add(frontLeftPivot);
-                  frontLeft.position.set(0, 0, 0);
-                  frontLeft.rotation.set(0, 0, 0);
-                  frontLeftPivot.add(frontLeft);
-                }
-
-                if (frontRight) {
-                  frontRightPivot = new THREE.Group();
-                  frontRightPivot.name = "frontRightPivot";
-                  frontRightPivot.position.copy(frontRight.position);
-                  frontRightPivot.rotation.copy(frontRight.rotation);
-                  frontRight.parent?.add(frontRightPivot);
-                  frontRight.position.set(0, 0, 0);
-                  frontRight.rotation.set(0, 0, 0);
-                  frontRightPivot.add(frontRight);
-                }
-
-                carGroup.userData.pivots = {
-                  frontLeftPivot,
-                  frontRightPivot
-                };
+                // 3. Setup the WheelSystem with the detected wheels
+                const wheelSystem = new WheelSystem(detectedWheels, clonedModel);
+                carGroup.userData.wheelSystem = wheelSystem;
 
                 // Disable procedural wheels when GLB vehicle exists
                 if (pivots) {
