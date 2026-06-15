@@ -206,25 +206,48 @@ export function getTerrainHeight(x: number, z: number, trackHelper?: any): numbe
     baseHeight = THREE.MathUtils.lerp(baseHeight, 3.8, sFactor * 0.90); // shallow water bed (surface is 9.0m)
   }
 
-  // 4. Dynamic Road Corridors Carving
+  // 4. Dynamic Road Corridors Carving (Absolute priority of roads over terrain)
   if (trackHelper && typeof trackHelper.getNearestTrackInfo === 'function') {
     const info = trackHelper.getNearestTrackInfo(new THREE.Vector3(x, 0, z));
-    if (info) {
+    if (info && info.nearestPoint) {
       const rType = typeof trackHelper.getRoadTypeAt === 'function' ? trackHelper.getRoadTypeAt(info.progress) : 'normal';
       const width = typeof trackHelper.getRoadWidthAt === 'function' ? trackHelper.getRoadWidthAt(info.progress) : 24;
       const halfWidth = width / 2;
-      const flatZone = halfWidth + 1.25; // zero-clipping road shoulder
-      const blendZone = 36.0;            // smooth shoulder ramp
+      
+      // Safety corridor is defined as roadWidth + 20 meters (or halfWidth + 10m on each side).
+      // We extend this with a 12.0m flatZone buffer for absolute security against collision.
+      const flatZone = halfWidth + 12.0; 
+      const blendZone = 30.0; // smooth ramp outwards from the safe corridor
 
-      if (rType !== 'bridge' && info.nearestPoint) {
-        // Standard ground shoulder beds carved level with spline
+      if (rType === 'bridge') {
+        // Bridges span beautifully over tunnels or waterways; carve terrain deep beneath the span (22 meters drop)
+        const bridgeDepthY = info.nearestPoint.y - 22.0;
         if (info.distanceToTrack < flatZone) {
-          baseHeight = info.nearestPoint.y - 0.18;
+          baseHeight = bridgeDepthY;
         } else if (info.distanceToTrack < flatZone + blendZone) {
           const t = (info.distanceToTrack - flatZone) / blendZone;
           const s = t * t * (3 - 2 * t);
-          const roadBedY = info.nearestPoint.y - 0.18;
-          baseHeight = THREE.MathUtils.lerp(roadBedY, baseHeight, s);
+          baseHeight = THREE.MathUtils.lerp(bridgeDepthY, baseHeight, s);
+        }
+      } else if (rType === 'tunnel') {
+        // Tunnels require mountain meshes above, but we carve the direct road bed path cleanly to avoid overlapping lane triangles
+        if (info.distanceToTrack < halfWidth + 2.0) {
+          baseHeight = info.nearestPoint.y - 0.45;
+        }
+      } else {
+        // Normal roads: flatten inside flatZone, and ramp up beautifully outside, clamping to prevent clipping
+        const roadBedY = info.nearestPoint.y - 0.45;
+        if (info.distanceToTrack < flatZone) {
+          baseHeight = roadBedY;
+        } else if (info.distanceToTrack < flatZone + blendZone) {
+          const t = (info.distanceToTrack - flatZone) / blendZone;
+          const s = t * t * (3 - 2 * t);
+          const rawTargetHeight = baseHeight;
+          const blendedValue = THREE.MathUtils.lerp(roadBedY, rawTargetHeight, s);
+          
+          // Clamp adjacent terrain heights so they rise gently away from the road corridor (road Y plus gradual rise offset)
+          const gradSlopeLimit = roadBedY + t * 4.5;
+          baseHeight = Math.min(gradSlopeLimit, blendedValue);
         }
       }
     }
@@ -530,10 +553,25 @@ export class TrackGeometryHelper {
         const clusterCount = 4 + Math.floor(random() * 5);
         for (let tc = 0; tc < clusterCount; tc++) {
           const side = random() > 0.5 ? 1 : -1;
-          // Spawn near-road buffers and heavy deep mountain clusters
-          const treeOffset = roadWidth / 2 + 5.0 + random() * 140.0;
+          // Spawn trees strictly at least 15 meters from the road edge
+          const treeOffset = roadWidth / 2 + 15.2 + random() * 140.0;
           const treePos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * treeOffset);
           treePos.y = getTerrainHeight(treePos.x, treePos.z, this);
+
+          // STRICT COLLISION & ENVIRONMENT CHECKS:
+          // 1. Minimum distance from road is 15 meters from road edge (halfWidth + 15m)
+          const tInfo = this.getNearestTrackInfo(treePos);
+          if (tInfo && tInfo.nearestPoint) {
+            const minTreeDist = tInfo.width / 2 + 15.0;
+            if (tInfo.distanceToTrack < minTreeDist) {
+              continue; // Reject tree!
+            }
+          }
+
+          // 2. Prevent trees spawning inside deep lakes, rivers, or above high mountain tops (exceeding 52m)
+          if (treePos.y > 52.0 || treePos.y < 1.0) {
+            continue; // Reject tree!
+          }
 
           // Select tree type:
           // 0 = Spruce Pine, 1 = Silver Birch, 2 = Autumn Oak, 3 = Shrub Bush, 4 = Wildflower
@@ -561,7 +599,7 @@ export class TrackGeometryHelper {
         case 0: // ZONE 0: START AREA (u: 0.0 - 0.1) - Meadows & Paddocks
           if (j % 30 === 0) {
             const side = (j % 60 === 0) ? 1 : -1;
-            const standPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * (roadWidth / 2 + 13.0));
+            const standPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * (roadWidth / 2 + 16.0));
             standPos.y = getTerrainHeight(standPos.x, standPos.z, this) - 0.1;
             this.grandstands.push({
               position: standPos,
@@ -571,20 +609,20 @@ export class TrackGeometryHelper {
           }
           if (j % 20 === 0) {
             const side = (j % 40 === 0) ? 1 : -1;
-            const flagPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * (roadWidth / 2 + 2.0));
+            const flagPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * (roadWidth / 2 + 4.5));
             flagPos.y = getTerrainHeight(flagPos.x, flagPos.z, this) + 4.0;
             this.lights.push({ position: flagPos, color: '#ffeaad', intensity: 2.0 }); // warm morning glow lamp
           }
           break;
 
-        case 1: // ZONE 1: DENSE FOREST (Birch, Oak, Pine) (u: 0.1 - 0.2)
+         case 1: // ZONE 1: DENSE FOREST (Birch, Oak, Pine) (u: 0.1 - 0.2)
           // Handled by the heavy open tree generator above
           break;
 
         case 2: // ZONE 2: COZY GERMAN/SWISS COUNTRY VILLAGE (u: 0.2 - 0.3)
           if (!isInsideRestricted && j % 15 === 0) {
             const side = random() > 0.5 ? 1 : -1;
-            const houseDist = roadWidth / 2 + 6.5 + random() * 8;
+            const houseDist = roadWidth / 2 + 15.0 + random() * 8;
             const hPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * houseDist);
             hPos.y = getTerrainHeight(hPos.x, hPos.z, this) - 0.1;
             
@@ -595,7 +633,7 @@ export class TrackGeometryHelper {
             });
 
             // Street lamps
-            const lanPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * (roadWidth / 2 + 1.5));
+            const lanPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * (roadWidth / 2 + 4.5));
             lanPos.y = getTerrainHeight(lanPos.x, lanPos.z, this) + 2.5;
             this.lights.push({ position: lanPos, color: '#ff9900', intensity: 3.5 }); // Cozy golden orange streetlights
           }
@@ -603,21 +641,28 @@ export class TrackGeometryHelper {
 
         case 3: // ZONE 3: LAKE & STONE BRIDGE ROAD (u: 0.3 - 0.4)
           if (rType === 'bridge' && j % 15 === 0) {
-            const bLeft = new THREE.Vector3().copy(pt).addScaledVector(normal, -18 - random() * 10);
-            const bRight = new THREE.Vector3().copy(pt).addScaledVector(normal, 18 + random() * 10);
+            const bLeft = new THREE.Vector3().copy(pt).addScaledVector(normal, -20 - random() * 10);
+            const bRight = new THREE.Vector3().copy(pt).addScaledVector(normal, 20 + random() * 10);
             bLeft.y = getTerrainHeight(bLeft.x, bLeft.z, this) + 3;
             bRight.y = getTerrainHeight(bRight.x, bRight.z, this) + 3;
 
-            this.rocks.push({
-              position: bLeft,
-              scale: new THREE.Vector3(6 + random() * 4, 10 + random() * 12, 6 + random() * 4),
-              rotation: new THREE.Euler(0, random() * Math.PI, 0)
-            });
-            this.rocks.push({
-              position: bRight,
-              scale: new THREE.Vector3(6 + random() * 4, 10 + random() * 12, 6 + random() * 4),
-              rotation: new THREE.Euler(0, random() * Math.PI, 0)
-            });
+            const infoL = this.getNearestTrackInfo(bLeft);
+            if (infoL && infoL.nearestPoint && infoL.distanceToTrack >= infoL.width / 2 + 15.0) {
+              this.rocks.push({
+                position: bLeft,
+                scale: new THREE.Vector3(6 + random() * 4, 10 + random() * 12, 6 + random() * 4),
+                rotation: new THREE.Euler(0, random() * Math.PI, 0)
+              });
+            }
+
+            const infoR = this.getNearestTrackInfo(bRight);
+            if (infoR && infoR.nearestPoint && infoR.distanceToTrack >= infoR.width / 2 + 15.0) {
+              this.rocks.push({
+                position: bRight,
+                scale: new THREE.Vector3(6 + random() * 4, 10 + random() * 12, 6 + random() * 4),
+                rotation: new THREE.Euler(0, random() * Math.PI, 0)
+              });
+            }
           }
           break;
 
@@ -625,7 +670,7 @@ export class TrackGeometryHelper {
           // Rural windmills billboard markers
           if (j % 55 === 0) {
             const side = (j % 110 === 0) ? 1 : -1;
-            const billPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * (roadWidth / 2 + 12));
+            const billPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * (roadWidth / 2 + 16));
             billPos.y = getTerrainHeight(billPos.x, billPos.z, this);
             this.billboards.push({
               position: billPos,
@@ -638,22 +683,25 @@ export class TrackGeometryHelper {
         case 5: // ZONE 5: BROOKSIDE VALLEYS (u: 0.5 - 0.6)
           if (!isInsideRestricted && random() < 0.4) {
             const side = random() > 0.5 ? 1 : -1;
-            const stoneDist = roadWidth / 2 + 2.0 + random() * 20;
+            const stoneDist = roadWidth / 2 + 15.5 + random() * 20;
             const rPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * stoneDist);
             rPos.y = getTerrainHeight(rPos.x, rPos.z, this) - 0.2;
 
-            this.rocks.push({
-              position: rPos,
-              scale: new THREE.Vector3(3 + random() * 3, 2 + random() * 2, 3 + random() * 3),
-              rotation: new THREE.Euler(random() * 0.2, random() * Math.PI, 0)
-            });
+            const infoRock = this.getNearestTrackInfo(rPos);
+            if (infoRock && infoRock.nearestPoint && infoRock.distanceToTrack >= infoRock.width / 2 + 15.0) {
+              this.rocks.push({
+                position: rPos,
+                scale: new THREE.Vector3(3 + random() * 3, 2 + random() * 2, 3 + random() * 3),
+                rotation: new THREE.Euler(random() * 0.2, random() * Math.PI, 0)
+              });
+            }
           }
           break;
 
         case 6: // ZONE 6: FARM BARNYARDS & SILOS (u: 0.6 - 0.7)
           if (j % 50 === 0) {
             const side = (j % 100 === 0) ? 1 : -1;
-            const billPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * (roadWidth / 2 + 10));
+            const billPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * (roadWidth / 2 + 16));
             billPos.y = getTerrainHeight(billPos.x, billPos.z, this);
             this.billboards.push({
               position: billPos,
@@ -665,7 +713,7 @@ export class TrackGeometryHelper {
 
         case 7: // ZONE 7: COWS & PASTORAL S-BENDS (u: 0.7 - 0.8)
           if (j % 30 === 0) {
-            const lPos = new THREE.Vector3().copy(pt).addScaledVector(normal, (j % 60 === 0 ? 1 : -1) * (roadWidth / 2 + 1.8));
+            const lPos = new THREE.Vector3().copy(pt).addScaledVector(normal, (j % 60 === 0 ? 1 : -1) * (roadWidth / 2 + 4.5));
             lPos.y = getTerrainHeight(lPos.x, lPos.z, this) + 1.5;
             this.lights.push({ position: lPos, color: '#ffd600', intensity: 2.2 });
           }
@@ -674,7 +722,7 @@ export class TrackGeometryHelper {
         case 8: // ZONE 8: RURAL HIGHWAY CORRIDOR (u: 0.8 - 0.9)
           if (j % 30 === 0) {
             const side = (j % 60 === 0) ? -1 : 1;
-            const billPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * (roadWidth / 2 + 10));
+            const billPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * (roadWidth / 2 + 16));
             billPos.y = getTerrainHeight(billPos.x, billPos.z, this);
 
             this.billboards.push({
@@ -688,7 +736,7 @@ export class TrackGeometryHelper {
         case 9: // ZONE 9: SPECTATOR RESORT & HOTELS (u: 0.9 - 1.0)
           if (j % 35 === 0) {
             const side = (j % 70 === 0) ? 1 : -1;
-            const standPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * (roadWidth / 2 + 12));
+            const standPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * (roadWidth / 2 + 16));
             standPos.y = getTerrainHeight(standPos.x, standPos.z, this) - 0.1;
             this.grandstands.push({
               position: standPos,
@@ -697,7 +745,7 @@ export class TrackGeometryHelper {
             });
           }
           if (j % 20 === 0) {
-            const flagPos = new THREE.Vector3().copy(pt).addScaledVector(normal, (j % 40 === 0 ? 1 : -1) * (roadWidth / 2 + 1.5));
+            const flagPos = new THREE.Vector3().copy(pt).addScaledVector(normal, (j % 40 === 0 ? 1 : -1) * (roadWidth / 2 + 4.5));
             flagPos.y = getTerrainHeight(flagPos.x, flagPos.z, this) + 4.5;
             this.lights.push({ position: flagPos, color: '#ffffff', intensity: 2.0 });
           }

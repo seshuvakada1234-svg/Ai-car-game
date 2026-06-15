@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { TrackGeometryHelper } from '../utils/track';
 import { createProceduralRockGeo } from './procedural';
-import { buildTerrain } from './terrain';
+import { buildTerrain, chunkManager } from './terrain';
 import { buildForest } from './forest';
 import { buildVillage } from './village';
 import { buildBridge } from './bridge';
@@ -62,6 +62,11 @@ export class DragonTrackWorld {
   }
 
   public update(elapsedSec: number, trackHelper: TrackGeometryHelper, playerRank = 1, isFinished = false): void {
+    // Dynamic preloading of terrain chunks around player
+    if (terrainManager.playerPos) {
+      chunkManager.update(terrainManager.playerPos);
+    }
+
     // Animate the interactive waterfall texture scrolls and splashing mist
     if (this.waterfallCtrl) {
       this.waterfallCtrl.update(elapsedSec);

@@ -10,6 +10,7 @@ import { particleSystem } from '../world/particleSystem';
 import { SuspensionSystem, SuspensionState } from './suspension';
 import { CarCollisionSystem } from './carCollision';
 import { TrafficAIService } from './trafficAI';
+import { terrainManager } from '../world/terrainManager';
 
 // Constant physical constraints matching hypercar simulator performance
 const MAX_SPEED = 78; // units/sec (~280 km/h)
@@ -70,15 +71,15 @@ export class GamePhysicsService {
    * Initialises the active lineup of opponents, the player, and dense commuter traffic
    */
   public initializeCars(playerName: string, difficulty: Difficulty, playerCarColor: string): CarState[] {
-    const aiColors = ['#ff003c', '#00f6ff', '#e100ff', '#ffac00', '#00ff3c'];
-    const aiNames = ['Apex', 'Phantom', 'Nova', 'Blaze', 'Titan'];
+    const aiColors = ['#ff053c', '#00f6ff', '#e105ff', '#ffac05', '#02ff3c', '#ff05aa', '#02ffcc', '#ffcc02'];
+    const aiNames = ['Apex', 'Phantom', 'Nova', 'Blaze', 'Titan', 'Viper', 'Shadow', 'Storm'];
     const result: CarState[] = [];
 
     this.carProgressHistory.clear();
     this.carHasPassedMidpoint.clear();
 
-    // 1. Setup Player Racer
-    const playerSpawnX = -6;
+    // 1. Setup Player Racer (Row 0, left side)
+    const playerSpawnX = -4.5;
     const playerSpawnZ = -15;
     const tempP3 = new THREE.Vector3(playerSpawnX, 0, playerSpawnZ);
     const pTrackInfo = this.trackHelper.getNearestTrackInfo(tempP3);
@@ -100,7 +101,7 @@ export class GamePhysicsService {
       currentLap: 1,
       currentCheckpointIndex: 0,
       distanceToNextCheckpoint: 999,
-      racePosition: 6,
+      racePosition: 1,
       totalDistanceTraveled: -15,
       isFinished: false,
       lastActiveTime: Date.now(),
@@ -112,13 +113,14 @@ export class GamePhysicsService {
       aiAggression: 0.5,
     });
 
-    // 2. Setup 5 Grid AI Competitors
-    for (let i = 0; i < 5; i++) {
-      const row = Math.floor(i / 2) + 1;
-      const side = i % 2 === 0 ? 1 : -1;
+    // 2. Setup 8 Grid AI Competitors (Formation: 2x2 grid)
+    for (let i = 0; i < 8; i++) {
+      const gridIndex = i + 1; // 1 to 8
+      const row = Math.floor(gridIndex / 2);
+      const side = gridIndex % 2 === 0 ? -1 : 1;
       
-      const offsetX = side * 7.5;
-      const offsetZ = -row * 16 - 8;
+      const offsetX = side * 4.5;
+      const offsetZ = -15 - row * 15;
 
       const tempR3 = new THREE.Vector3(offsetX, 0, offsetZ);
       const aiTrackInfo = this.trackHelper.getNearestTrackInfo(tempR3);
@@ -131,7 +133,7 @@ export class GamePhysicsService {
         speedFactor = 0.98;
         aggression = 0.72;
       } else if (difficulty === 'hard') {
-        speedFactor = 1.06;
+        speedFactor = 1.05;
         aggression = 0.95;
       }
 
@@ -150,7 +152,7 @@ export class GamePhysicsService {
         currentLap: 1,
         currentCheckpointIndex: 0,
         distanceToNextCheckpoint: 999,
-        racePosition: i + 1,
+        racePosition: i + 2,
         totalDistanceTraveled: offsetZ,
         isFinished: false,
         lastActiveTime: Date.now(),
@@ -164,11 +166,11 @@ export class GamePhysicsService {
       });
     }
 
-    // 3. Delegate dense commute traffic spawning to TrafficAIService (Spawns 32 coherent vehicles)
-    const trafficLineup = this.trafficAIService.generateTrafficLineup();
-    result.push(...trafficLineup);
+    // 3. Disabled civilian commute traffic spawning as requested to focus on competitive grand prix racing
+    // const trafficLineup = this.trafficAIService.generateTrafficLineup();
+    // result.push(...trafficLineup);
 
-    console.log(`Successfully initialized a total of ${result.length} vehicles (1 player, 5 AI rivals, 32 traffic cars).`);
+    console.log(`Successfully initialized a total of ${result.length} vehicles (1 player, 8 AI rivals, 0 civilian traffic).`);
     return result;
   }
 
@@ -331,23 +333,113 @@ export class GamePhysicsService {
     car.position.x += car.velocity.x * dt;
     car.position.z += car.velocity.z * dt;
 
+    // --- 5.1 ROAD GEOMETRY CHECKS AND TRACK BOUNDARY COUPLINGS (Invisible Barriers & Automatic Recovery Steering) ---
+    const posCheckVal = GamePhysicsService._vecA.set(car.position.x, car.position.y, car.position.z);
+    const checkTrackInfo = this.trackHelper.getNearestTrackInfo(posCheckVal, car.id);
+    const currentRoadWidth = checkTrackInfo.width;
+
+    // A. Automatic Steer-Back to Road Center if reaching the grass/edge
+    const grassSteerThreshold = currentRoadWidth / 2 - 2.8; 
+    if (Math.abs(checkTrackInfo.sideOffset) > grassSteerThreshold) {
+      const sideSign = Math.sign(checkTrackInfo.sideOffset); // +1: right of center, -1: left of center
+      
+      // Calculate target heading pointing inwards
+      const roadHeading = Math.atan2(checkTrackInfo.tangent.x, checkTrackInfo.tangent.z);
+      // Turn inwards towards center
+      const inwardsOffsetAngle = 0.38 * -sideSign; 
+      let targetHeading = roadHeading + inwardsOffsetAngle;
+      
+      let headingDiff = targetHeading - car.angle;
+      while (headingDiff < -Math.PI) headingDiff += Math.PI * 2;
+      while (headingDiff > Math.PI) headingDiff -= Math.PI * 2;
+      
+      // Apply steer-back correction torque
+      const steerBackStrength = car.isAI ? 5.0 : 3.0;
+      car.angle += headingDiff * steerBackStrength * dt;
+      
+      // Apply physical pull back towards the road center
+      const inwardImpulse = 15.0 * dt;
+      car.velocity.x += -checkTrackInfo.normal.x * sideSign * inwardImpulse;
+      car.velocity.z += -checkTrackInfo.normal.z * sideSign * inwardImpulse;
+    }
+
+    // B. Hard Position Constraint & Invisible Barriers (Absolutely cannot leave the asphalt)
+    const absoluteLimit = currentRoadWidth / 2 - 1.0; // keep vehicle's center within asphalt
+    if (Math.abs(checkTrackInfo.sideOffset) > absoluteLimit) {
+      const sideSign = Math.sign(checkTrackInfo.sideOffset);
+      
+      // Snap position back onto the road surface
+      car.position.x = checkTrackInfo.nearestPoint.x + checkTrackInfo.normal.x * absoluteLimit * sideSign;
+      car.position.z = checkTrackInfo.nearestPoint.z + checkTrackInfo.normal.z * absoluteLimit * sideSign;
+      
+      // Zero out outward-facing velocity 
+      const velVec = new THREE.Vector3(car.velocity.x, 0, car.velocity.z);
+      const boundaryNormal = new THREE.Vector3(checkTrackInfo.normal.x, 0, checkTrackInfo.normal.z).multiplyScalar(sideSign);
+      
+      const speedAlongBnyNormal = velVec.dot(boundaryNormal);
+      if (speedAlongBnyNormal > 0) {
+        // Deflect/bounce opposite to boundary normal beautifully
+        velVec.addScaledVector(boundaryNormal, -1.15 * speedAlongBnyNormal);
+        car.velocity.x = velVec.x;
+        car.velocity.z = velVec.z;
+        car.speed *= 0.90; // slight deceleration drag from rubbing the invisible barrier
+      }
+    }
+
+    // C. Automatic Road Correction & Emergency Recovery (Extreme out-of-bounds fail-safe)
+    const outOfBoundsLimit = currentRoadWidth / 2 + 6.0;
+    if (Math.abs(checkTrackInfo.sideOffset) > outOfBoundsLimit) {
+      console.warn(`Emergency road correction activated for car ${car.id}. Realignment executed.`);
+      // Cleanly snap back onto the center of nearest road track segment
+      car.position.x = checkTrackInfo.nearestPoint.x;
+      car.position.z = checkTrackInfo.nearestPoint.z;
+      car.position.y = checkTrackInfo.nearestPoint.y + 0.2;
+      
+      // Re-align driving heading angle with road tangent
+      const targetAngle = Math.atan2(checkTrackInfo.tangent.x, checkTrackInfo.tangent.z);
+      car.angle = targetAngle;
+      
+      // Setup forward velocity vector aligning perfectly with track tangent
+      const currentSpeed = Math.max(12.0, Math.abs(car.speed));
+      car.velocity.x = checkTrackInfo.tangent.x * currentSpeed;
+      car.velocity.z = checkTrackInfo.tangent.z * currentSpeed;
+      car.speed = currentSpeed;
+    }
+
     // --- 6. VERTICAL SUSPENSION, DOWNFORCE & GRAVITY CLAMPING ---
     const pos3 = GamePhysicsService._vecA.set(car.position.x, car.position.y, car.position.z);
     const trackInfo = this.trackHelper.getNearestTrackInfo(pos3, car.id);
-    const groundHeight = trackInfo.nearestPoint.y;
-    const roadY = groundHeight + 0.05;
+    
+    // Query high-precision RoadBVH first
+    const bvhRoadY = terrainManager.queryRoadHeight(pos3);
+    const terrainY = terrainManager.getHeight(car.position.x, car.position.z);
+    
+    let roadY = trackInfo.nearestPoint.y + 0.05;
+    if (bvhRoadY !== null) {
+      roadY = bvhRoadY + 0.05;
+    } else {
+      // If outside RoadBVH mesh for some reason, use track spline or terrain height
+      if (trackInfo.distanceToTrack < trackInfo.width / 2 + 3) {
+        roadY = trackInfo.nearestPoint.y + 0.05;
+      } else {
+        roadY = terrainY + 0.05;
+      }
+    }
+    
+    // Road must always have higher priority than terrain, but prevent falling below terrain
+    const minHeight = Math.max(roadY, terrainY + 0.05);
 
     // Realistic Continuous Downforce: F_downforce = -0.022 * v^2 to keep cars extremely planted at speed
     const downforceY = -0.022 * car.speed * car.speed;
 
     // Vertical physics integration
-    if (car.position.y <= roadY + 0.15) {
+    if (car.position.y <= minHeight + 0.15) {
       const springK = 180.0;     // high-stiffness GT3 racing spring rate
       const dampC = 16.0;        // heavy race dampers to prevent oscillations
       
       // Net vertical acceleration: Spring force (Hooke's Law) + Damping force + Downforce
       // a_y = k * (roadY - y) - c * v_y + downforce
-      const accelY = (roadY - car.position.y) * springK - dampC * car.velocity.y + downforceY;
+      const accelY = (minHeight - car.position.y) * springK - dampC * car.velocity.y + downforceY;
       
       // Update velocity using dt
       car.velocity.y += accelY * dt;
@@ -362,19 +454,19 @@ export class GamePhysicsService {
     car.position.y += car.velocity.y * dt;
 
     // Secure bottom constraints to absolutely prevent sinking under bridges
-    if (car.position.y < roadY) {
-      car.position.y = roadY;
+    if (car.position.y < minHeight) {
+      car.position.y = minHeight;
       car.velocity.y = Math.max(0, car.velocity.y);
     }
 
     // Soft height constraints and damping instead of hard teleports:
-    if (car.position.y > roadY + 1.2) {
+    if (car.position.y > minHeight + 1.2) {
       // Gentle soft damping of upward velocity
       if (car.velocity.y > 0) {
         car.velocity.y *= Math.exp(-12.0 * dt);
       }
       // Apply a restorative force to pull the car back down
-      const heightOffset = car.position.y - (roadY + 1.2);
+      const heightOffset = car.position.y - (minHeight + 1.2);
       car.velocity.y -= heightOffset * 35.0 * dt;
     }
 

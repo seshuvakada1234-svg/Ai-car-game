@@ -32,6 +32,8 @@ interface HUDProps {
   trackHelper: TrackGeometryHelper;
   onPauseToggle: () => void;
   isPaused: boolean;
+  cameraView?: 'CLOSE' | 'MEDIUM' | 'FAR' | 'COCKPIT';
+  onCameraViewChange?: (view: 'CLOSE' | 'MEDIUM' | 'FAR' | 'COCKPIT') => void;
 }
 
 export const HUD: React.FC<HUDProps> = ({
@@ -43,6 +45,8 @@ export const HUD: React.FC<HUDProps> = ({
   trackHelper,
   onPauseToggle,
   isPaused,
+  cameraView = 'MEDIUM',
+  onCameraViewChange,
 }) => {
   // Speed calculation
   const speedKmh = Math.floor(Math.abs(player.speed) * 3.6);
@@ -540,7 +544,15 @@ export const HUD: React.FC<HUDProps> = ({
             </button>
 
             <button
-              onClick={() => triggerNotification('Camera switched to cinematic angles')}
+              onClick={() => {
+                if (onCameraViewChange) {
+                  const modes: ('CLOSE' | 'MEDIUM' | 'FAR' | 'COCKPIT')[] = ['CLOSE', 'MEDIUM', 'FAR', 'COCKPIT'];
+                  const curIdx = modes.indexOf((cameraView || 'MEDIUM') as any);
+                  const nextMode = modes[(curIdx + 1) % modes.length];
+                  onCameraViewChange(nextMode);
+                  triggerNotification(`Camera: ${nextMode}`);
+                }
+              }}
               className="p-3 rounded-full bg-slate-950/70 hover:bg-slate-800 border border-slate-700/20 backdrop-blur-md text-white/90 active:scale-95 transition-all shadow-md flex items-center justify-center shrink-0"
               title="Camera view"
             >

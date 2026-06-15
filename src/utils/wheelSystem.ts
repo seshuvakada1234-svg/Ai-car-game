@@ -9,6 +9,8 @@ export interface WheelAssembly {
   initialLocalPos: THREE.Vector3;
   originalQuaternion: THREE.Quaternion;
   originalScale: THREE.Vector3;
+  spinAxis: THREE.Vector3;
+  spinSign: number;
 }
 
 export class WheelSystem {
@@ -68,6 +70,46 @@ export class WheelSystem {
     const originalQuaternion = node.quaternion.clone();
     const originalScale = node.scale.clone();
 
+    // Determine the raw local spin axis by checking local bounding box of raw geometry
+    const tempPosition = node.position.clone();
+    const tempRotation = node.rotation.clone();
+    const tempScale = node.scale.clone();
+
+    // Temporarily clear scale, rotation & position to compute local bounding box correctly
+    node.position.set(0, 0, 0);
+    node.rotation.set(0, 0, 0);
+    node.scale.set(1, 1, 1);
+    node.updateMatrix();
+
+    const localBox = new THREE.Box3().setFromObject(node);
+
+    // Restore original transform
+    node.position.copy(tempPosition);
+    node.rotation.copy(tempRotation);
+    node.scale.copy(tempScale);
+    node.updateMatrix();
+
+    const size = new THREE.Vector3();
+    localBox.getSize(size);
+
+    // Default to local X-axis (1, 0, 0)
+    const localSpinAxis = new THREE.Vector3(1, 0, 0);
+    const minDim = Math.min(size.x, size.y, size.z);
+
+    if (minDim === size.y) {
+      localSpinAxis.set(0, 1, 0);
+    } else if (minDim === size.z) {
+      localSpinAxis.set(0, 0, 1);
+    }
+
+    // Now, transform this local spin axis into the car's body coordinate system
+    const spinAxis = localSpinAxis.clone().applyQuaternion(originalQuaternion).normalize();
+
+    // Determine spin sign based on axis dot left of car (positive X)
+    // If it points to the left (+X), rotating positive curl goes forward.
+    // If it points to the right (-X), we invert it.
+    const spinSign = spinAxis.x >= 0 ? 1 : -1;
+
     // Create the Pivot (handles steering yaw on local Y-axis and suspension vertical travel Y)
     const pivot = new THREE.Group();
     pivot.name = `${name}Pivot`;
@@ -76,7 +118,7 @@ export class WheelSystem {
     
     parent.add(pivot);
 
-    // Create the Hub (handles dynamic wheelspin roll on local X-axis)
+    // Create the Hub (handles dynamic wheelspin roll on local spinAxis)
     const hub = new THREE.Group();
     hub.name = `${name}Hub`;
     hub.position.set(0, 0, 0);
@@ -96,7 +138,9 @@ export class WheelSystem {
       hub,
       initialLocalPos,
       originalQuaternion,
-      originalScale
+      originalScale,
+      spinAxis,
+      spinSign
     };
   }
 
@@ -114,7 +158,7 @@ export class WheelSystem {
     const maxTravelY = 0.10;  // maximum suspension travel range in meters
     const maxSteerAngle = 0.36; // maximum turning steering limit
 
-    // 1. Calculate wheelspin pace based on actual vehicle speeds
+    // Calculate wheelspin pace based on actual vehicle speeds
     const speed = car.speed;
     let wheelRotationSpeed = Math.abs(speed);
     
@@ -124,11 +168,10 @@ export class WheelSystem {
     }
 
     const rotDelta = (wheelRotationSpeed * elapsedSec) / wheelRadius;
-    this.wheelspinAngle += rotDelta;
+    this.wheelspinAngle += rotDelta * (speed >= 0 ? 1 : -1);
     this.wheelspinAngle %= Math.PI * 2;
 
     const qSteer = new THREE.Quaternion();
-    const qSpin = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), this.wheelspinAngle);
     const qZero = new THREE.Quaternion().set(0, 0, 0, 1);
 
     const updateAssembly = (
@@ -153,8 +196,9 @@ export class WheelSystem {
         assembly.pivot.quaternion.copy(qZero);
       }
 
-      // Handle Wheelspin Roll (Decoupled on Hub level)
-      assembly.hub.quaternion.copy(qSpin);
+      // Handle Wheelspin Roll (Decoupled on Hub level, based on cached spinAxis and correct directional spinSign)
+      const rollAngle = this.wheelspinAngle * assembly.spinSign;
+      assembly.hub.quaternion.setFromAxisAngle(assembly.spinAxis, rollAngle);
     };
 
     updateAssembly(this.frontLeft, suspState ? suspState.frontLeft : 0, true);

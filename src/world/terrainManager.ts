@@ -4,8 +4,22 @@ import { MeshBVH, acceleratedRaycast } from 'three-mesh-bvh';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { MemoryPool } from '../utils/memoryPool';
 
-// Inject accelerated raycast into Three.js Mesh prototype
-THREE.Mesh.prototype.raycast = acceleratedRaycast;
+// Inject robust self-healing accelerated raycast into Three.js Mesh prototype
+const originalMeshRaycast = THREE.Mesh.prototype.raycast;
+THREE.Mesh.prototype.raycast = function(this: THREE.Mesh, raycaster, intersects) {
+  try {
+    return acceleratedRaycast.call(this, raycaster, intersects);
+  } catch (err) {
+    console.warn("Recoverable: acceleratedRaycast failed on mesh, falling back to native raycaster:", err);
+    try {
+      if (originalMeshRaycast) {
+        return originalMeshRaycast.call(this, raycaster, intersects);
+      }
+    } catch (fallbackErr) {
+      console.error("Critical: Native raycasting fallback also failed:", fallbackErr);
+    }
+  }
+};
 
 export class TerrainManager {
   private static instance: TerrainManager | null = null;
@@ -18,6 +32,8 @@ export class TerrainManager {
   private cols: number;
   private rows: number;
   private trackHelper: TrackGeometryHelper | null = null;
+
+  public playerPos = new THREE.Vector3();
 
   // BVH-accelerated road physics mesh
   private roadBVHMesh: THREE.Mesh | null = null;
@@ -105,7 +121,12 @@ export class TerrainManager {
 
     if (geometriesToMerge.length > 0) {
       try {
-        const mergedGeom = mergeGeometries(geometriesToMerge, false);
+        let mergedGeom: THREE.BufferGeometry | null = null;
+        if (geometriesToMerge.length === 1) {
+          mergedGeom = geometriesToMerge[0];
+        } else {
+          mergedGeom = mergeGeometries(geometriesToMerge, false);
+        }
         if (mergedGeom) {
           // Build MeshBVH
           (mergedGeom as any).boundsTree = new MeshBVH(mergedGeom);
@@ -167,6 +188,20 @@ export class TerrainManager {
       console.warn("Exception in queryRoadHeight raycast helper:", e);
     }
     return null;
+  }
+
+  public clear(): void {
+    if (this.roadBVHMesh) {
+      this.roadBVHMesh.geometry.dispose();
+      if (Array.isArray(this.roadBVHMesh.material)) {
+        this.roadBVHMesh.material.forEach((m: any) => m.dispose());
+      } else {
+        this.roadBVHMesh.material.dispose();
+      }
+      this.roadBVHMesh = null;
+    }
+    this.roadMeshesCache = [];
+    this.trackHelper = null;
   }
 }
 export const terrainManager = TerrainManager.getInstance();
