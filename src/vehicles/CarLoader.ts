@@ -12,8 +12,11 @@ export interface LoadedCarAsset {
 
 export class CarLoader {
   /**
-   * Clones and prepares a high-performance GLTF car model structure, setting up shadows,
-   * materials, detecting wheels/lights, and creating the high-precision WheelSystem hierarchy.
+   * Clones and prepares a high-performance GLTF car model, setting up shadows,
+   * materials, detecting wheels/lights, and creating the WheelSystem hierarchy.
+   *
+   * FIX: Bounding box is computed with wheel meshes hidden so that the chassis
+   * height (finalY) is not inflated by wheel geometry sticking out below/above.
    */
   public static loadAndPrepareCar(carId: string, carGroup: THREE.Group): LoadedCarAsset | null {
     if (!gltfModelCache.isLoaded) return null;
@@ -21,108 +24,110 @@ export class CarLoader {
     const modelSource = getCarModelForId(carId);
     if (!modelSource) return null;
 
-    // Clone the model once
     const clonedModel = modelSource.clone();
     clonedModel.name = 'gltf_car_model';
     clonedModel.updateMatrixWorld(true);
 
-    // Ensure every mesh's geometry bounding box is computed from scratch
     clonedModel.traverse((node) => {
-      if (node instanceof THREE.Mesh) {
-        node.geometry.computeBoundingBox();
+      if (node instanceof THREE.Mesh) node.geometry.computeBoundingBox();
+    });
+
+    // --- Collect wheel meshes so we can hide them when computing chassis bounds ---
+    const wheelTerms     = ['wheel', 'tire', 'rim'];
+    const forbiddenTerms = ['caliper', 'disc', 'brake', 'arch', 'housing'];
+    const wheelMeshes: THREE.Object3D[] = [];
+
+    clonedModel.traverse((node) => {
+      const nl = node.name.toLowerCase();
+      if (
+        wheelTerms.some(t => nl.includes(t)) &&
+        !forbiddenTerms.some(t => nl.includes(t))
+      ) {
+        wheelMeshes.push(node);
       }
     });
 
-    // Compute bounding box and center offsets to position the model correctly
-    const box = new THREE.Box3().setFromObject(clonedModel);
+    // Hide wheels before measuring chassis height so the box reflects only
+    // the body/chassis and is not pulled down by tyre geometry.
+    wheelMeshes.forEach(w => { w.visible = false; });
+    const box  = new THREE.Box3().setFromObject(clonedModel);
     const size = box.getSize(new THREE.Vector3());
+    // Restore visibility immediately
+    wheelMeshes.forEach(w => { w.visible = true; });
+
     const center = new THREE.Vector3();
     box.getCenter(center);
 
-    // Place vehicle on ground: car.position.y = -box.min.y
+    // Place chassis so its bottom rests at Y=0
     const finalY = -box.min.y;
-    console.log("[CarLoader] Car ID:", carId, "height:", size.y, "box.min.y:", box.min.y, "final y:", finalY);
+
+    console.log('[CarLoader]', {
+      id: carId,
+      boxMinY: box.min.y,
+      boxMaxY: box.max.y,
+      finalY,
+      height: size.y,
+    });
 
     clonedModel.userData.boundingBox = box;
-    clonedModel.userData.height = size.y;
-    clonedModel.userData.initialY = finalY;
+    clonedModel.userData.height      = size.y;
+    clonedModel.userData.initialY    = finalY;
 
-    // Center the chassis
     clonedModel.position.x -= center.x;
     clonedModel.position.z -= center.z;
-    clonedModel.position.y = finalY;
+    clonedModel.position.y  = finalY;
 
-    // Collect wheels inside the model first
+    // Collect wheel root nodes for WheelSystem (before attaching to scene)
     const detectedWheels: THREE.Object3D[] = [];
     clonedModel.traverse((node) => {
-      const nameLower = node.name.toLowerCase();
-      const isMatch = nameLower.includes("wheel") || nameLower.includes("tire") || nameLower.includes("rim");
+      const nl = node.name.toLowerCase();
+      const isMatch = nl.includes('wheel') || nl.includes('tire') || nl.includes('rim');
       if (isMatch) {
         let hasAncestorMatched = false;
         let parent = node.parent;
         while (parent) {
-          if (detectedWheels.includes(parent)) {
-            hasAncestorMatched = true;
-            break;
-          }
+          if (detectedWheels.includes(parent)) { hasAncestorMatched = true; break; }
           parent = parent.parent;
         }
-        if (!hasAncestorMatched) {
-          detectedWheels.push(node);
-        }
+        if (!hasAncestorMatched) detectedWheels.push(node);
       }
     });
 
-    // We must update the world matrix so global positions and local matrices are correct
     carGroup.add(clonedModel);
     clonedModel.updateMatrixWorld(true);
 
-    // Setup the WheelSystem hierarchy (SteerPivot -> SuspensionPivot -> Hub -> WheelMesh)
     const wheelSystem = new WheelSystem(detectedWheels, clonedModel);
 
     const brakeLights: THREE.Material[] = [];
-    const headlights: THREE.Mesh[] = [];
+    const headlights:  THREE.Mesh[]     = [];
 
-    // Setup shadows and material properties
     clonedModel.traverse((node) => {
-      console.log("[GLTF Scene Traverse] Node Name:", node.name);
+      console.log('[GLTF Scene Traverse] Node Name:', node.name);
       if (node instanceof THREE.Mesh) {
-        node.visible = true;
+        node.visible       = true;
         node.frustumCulled = false;
-        node.castShadow = (carId === 'player');
+        node.castShadow    = (carId === 'player');
         node.receiveShadow = true;
 
         const materials = Array.isArray(node.material) ? node.material : [node.material];
         materials.forEach((mat) => {
           if (!mat) return;
-          if (mat.emissive && typeof mat.emissive.set === 'function') {
-            mat.emissive.set(0x000000);
-          }
+          if (mat.emissive && typeof mat.emissive.set === 'function') mat.emissive.set(0x000000);
           mat.emissiveIntensity = 0;
-          mat.roughness = 0.5;
-          mat.metalness = 0.8;
+          mat.roughness  = 0.5;
+          mat.metalness  = 0.8;
 
-          // Identify brake lights material if we can
-          const matName = mat.name.toLowerCase();
-          if (matName.includes('brakelight') || matName.includes('taillight') || matName.includes('brake_light')) {
+          const mn = mat.name.toLowerCase();
+          if (mn.includes('brakelight') || mn.includes('taillight') || mn.includes('brake_light')) {
             brakeLights.push(mat);
           }
         });
 
-        // Identify lights meshes
         const meshName = node.name.toLowerCase();
-        if (meshName.includes('headlight')) {
-          headlights.push(node);
-        }
+        if (meshName.includes('headlight')) headlights.push(node);
       }
     });
 
-    return {
-      model: clonedModel,
-      wheelSystem,
-      brakeLights,
-      headlights,
-      height: size.y
-    };
+    return { model: clonedModel, wheelSystem, brakeLights, headlights, height: size.y };
   }
 }
