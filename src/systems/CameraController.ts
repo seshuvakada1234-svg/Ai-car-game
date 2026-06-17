@@ -1,111 +1,126 @@
 import * as THREE from 'three';
 import { CarState } from '../types';
 
+// Forza Horizon 5 style chase camera — fixed tuning constants
+const CAMERA_DISTANCE = 8;
+const CAMERA_HEIGHT = 3.2;
+const LOOKAHEAD_DIST = 10;
+const LOOKAHEAD_HEIGHT = 1.8;
+const POS_LERP = 0.12;
+const LOOK_LERP = 0.15;
+const MIN_DIST = 6;
+const MAX_DIST = 10;
+const FOV = 65;
+
 export class CameraController {
   private camera: THREE.PerspectiveCamera;
   private scene?: THREE.Scene;
   private isInitialized = false;
-  private lastLogTime = 0;
+  private frustumCullingHandled = false;
 
-  constructor(camera: THREE.PerspectiveCamera, baseFov = 60, scene?: THREE.Scene) {
+  // Pre-allocated scratch vectors — reused every frame, never recreated in update()
+  private carPosition = new THREE.Vector3();
+  private forward = new THREE.Vector3();
+  private up = new THREE.Vector3(0, 1, 0);
+  private desiredPosition = new THREE.Vector3();
+  private desiredLookTarget = new THREE.Vector3();
+  private lookTarget = new THREE.Vector3();
+  private toCamera = new THREE.Vector3();
+  private smoothY = 0;
+
+  constructor(camera: THREE.PerspectiveCamera, baseFov = FOV, scene?: THREE.Scene) {
     this.camera = camera;
     this.scene = scene;
 
-    // Reset initialization when requested
+    this.camera.fov = FOV;
+    this.camera.updateProjectionMatrix();
+
     window.addEventListener('reset-camera', () => {
       this.isInitialized = false;
     });
   }
 
-  /**
-   * Resets the camera orientation by resetting the initialization flag
-   */
+  /** Resets the camera so the next update() snaps instead of lerping. */
   public reset(playerPos: THREE.Vector3, playerAngle: number): void {
     this.isInitialized = false;
+    this.smoothY = playerPos.y;
   }
 
   /**
-   * Updates camera position, rotation, and look-at target matching the specified chase style.
+   * Single Forza Horizon 5 style chase camera. Yaw-only, no quaternions,
+   * no springs, no terrain raycasts. Zero allocations inside this method.
    */
   public update(
     player: CarState,
     elapsedSec: number,
     controls: { forward: boolean; backward: boolean; left: boolean; right: boolean; nitro: boolean },
-    activeMode: string = 'MEDIUM' // Kept the signature for compatibility, but ignored
+    activeMode: string = 'CHASE' // kept for signature compatibility, ignored — single camera only
   ): void {
     if (!player || !player.position) return;
 
-    // 1. Get the player's 3D vehicle root object
-    const playerGroup = this.scene?.getObjectByName('car_root_player');
-
-    // 2. Compute position and quaternion representing the vehicle's orientation
-    const carPosition = new THREE.Vector3(player.position.x, player.position.y, player.position.z);
-    const carQuaternion = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), player.angle);
-
-    if (playerGroup) {
-      carPosition.copy(playerGroup.position);
-      carQuaternion.copy(playerGroup.quaternion);
-
-      // Disable frustum culling recursively for all meshes in the player group to prevent disappearing
-      playerGroup.traverse((obj) => {
-        if ((obj as any).isMesh) {
-          obj.frustumCulled = false;
-        }
-      });
+    // Disable frustum culling on the player mesh exactly once, not every frame
+    if (!this.frustumCullingHandled) {
+      const playerGroup = this.scene?.getObjectByName('car_root_player');
+      if (playerGroup) {
+        playerGroup.traverse((obj) => {
+          if ((obj as any).isMesh) obj.frustumCulled = false;
+        });
+        this.frustumCullingHandled = true;
+      }
     }
 
-    // 3. Setup single Third-Person Chase Camera parameters
-    // Target: cameraHeight = 2.5m, cameraDistance = 7m, lookHeight = 1.3m
-    // camera.position: desiredPosition = player.position - forward * 7 + up * 2.5
-    // camera.lookAt: player.position + forward * 8 + up * 1.3
-    const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(carQuaternion);
-    const up = new THREE.Vector3(0, 1, 0);
-
-    const desiredPosition = carPosition.clone()
-      .addScaledVector(forward, -7.0)
-      .addScaledVector(up, 2.5);
-
-    const desiredLookAt = carPosition.clone()
-      .addScaledVector(forward, 8.0)
-      .addScaledVector(up, 1.3);
-
-    // 4. Initial snap or smooth follow with lerp(desiredPosition, 0.10)
+    // Smooth only the vertical axis to filter suspension jitter.
+    // Snap on the very first frame so the camera doesn't creep up from 0.
+    // Never read playerGroup.position.y — it contains suspension movement.
     if (!this.isInitialized) {
-      this.camera.position.copy(desiredPosition);
+      this.smoothY = player.position.y;
+    } else {
+      this.smoothY = THREE.MathUtils.lerp(this.smoothY, player.position.y, 0.05);
+    }
+
+    this.carPosition.set(player.position.x, this.smoothY, player.position.z);
+
+    // Yaw-only forward vector — no quaternions, no pitch, no roll
+    this.forward.set(Math.sin(player.angle), 0, Math.cos(player.angle)).normalize();
+
+    this.desiredPosition
+      .copy(this.carPosition)
+      .addScaledVector(this.forward, -CAMERA_DISTANCE)
+      .addScaledVector(this.up, CAMERA_HEIGHT);
+
+    this.desiredLookTarget
+      .copy(this.carPosition)
+      .addScaledVector(this.forward, LOOKAHEAD_DIST)
+      .addScaledVector(this.up, LOOKAHEAD_HEIGHT);
+
+    if (!this.isInitialized) {
+      this.camera.position.copy(this.desiredPosition);
+      this.lookTarget.copy(this.desiredLookTarget);
       this.isInitialized = true;
     } else {
-      this.camera.position.lerp(desiredPosition, 0.10);
+      this.camera.position.lerp(this.desiredPosition, POS_LERP);
+      this.lookTarget.lerp(this.desiredLookTarget, LOOK_LERP);
     }
 
-    // 5. ANTI-CLIPPING: Enforce strict distance limits
-    // Minimum distance from player: 5m, Maximum distance: 10m
-    const toCamera = new THREE.Vector3().subVectors(this.camera.position, carPosition);
-    const distToPlayer = toCamera.length();
+    // Clamp distance to prevent clipping through the car or drifting too far
+    this.toCamera.subVectors(this.camera.position, this.carPosition);
+    const dist = this.toCamera.length();
 
-    if (distToPlayer < 5.0) {
-      // Move camera backward
-      if (distToPlayer > 0.01) {
-        toCamera.multiplyScalar(5.0 / distToPlayer);
-      } else {
-        const backDirection = new THREE.Vector3(0, 0, -1).applyQuaternion(carQuaternion);
-        toCamera.copy(backDirection).multiplyScalar(5.0);
-      }
-      this.camera.position.copy(carPosition).add(toCamera);
-    } else if (distToPlayer > 10.0) {
-      toCamera.multiplyScalar(10.0 / distToPlayer);
-      this.camera.position.copy(carPosition).add(toCamera);
+    if (dist <= 0.001) {
+      this.camera.position
+        .copy(this.carPosition)
+        .addScaledVector(this.forward, -MIN_DIST)
+        .addScaledVector(this.up, CAMERA_HEIGHT);
+    } else if (dist < MIN_DIST) {
+      this.toCamera.multiplyScalar(MIN_DIST / dist);
+      this.camera.position.copy(this.carPosition).add(this.toCamera);
+    } else if (dist > MAX_DIST) {
+      this.toCamera.multiplyScalar(MAX_DIST / dist);
+      this.camera.position.copy(this.carPosition).add(this.toCamera);
     }
 
-    // 6. Ensure camera looks smoothly at the oriented forward lookTarget
-    this.camera.lookAt(desiredLookAt);
-
-    // 7. Debug logging: Print positions every 5 seconds
-    const now = performance.now();
-    if (now - this.lastLogTime > 5000) {
-      this.lastLogTime = now;
-      console.log("[Camera Debug] Player Position:", carPosition);
-      console.log("[Camera Debug] Camera Position:", this.camera.position);
-    }
+    // Only ever orient via lookAt — never write rotation/quaternion directly
+    this.camera.lookAt(this.lookTarget);
   }
 }
 
