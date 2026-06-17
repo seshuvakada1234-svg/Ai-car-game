@@ -5,8 +5,14 @@ import { WheelSystem } from './WheelSystem';
 
 export class CarAnimator {
   /**
-   * Animates the car chassis (handling body roll, weight-transfer pitching, micro-vibrations)
-   * and delegates precise steering and spin rotation updates to the wheel system.
+   * Animates car chassis body roll, pitch, and micro-vibration, then delegates
+   * steering yaw + wheel spin to WheelSystem.
+   *
+   * OWNERSHIP CONTRACT:
+   *   carGroup.rotation.{x,z}  → owned here (roll + pitch + vibe)
+   *   carGroup.position.y       → owned by VehicleRenderer ONLY
+   *   suspensionPivot.position  → owned by VehicleRenderer ONLY
+   *   car.position.y            → owned by physics engine ONLY
    */
   public static animateChassis(
     car: CarState,
@@ -20,40 +26,37 @@ export class CarAnimator {
       return { frontLeft: 0, frontRight: 0, rearLeft: 0, rearRight: 0, bodyRoll: 0, bodyPitch: 0 };
     }
 
-    // Smooth speed factor ratio
     const speedRatio = Math.min(1.0, Math.abs(car.speed) / 78);
 
-    // Calculate dynamic steering offset for front wheel orientation
     let steerOffset = 0;
     if (car.id === 'player') {
-      const steerVal = car.steerValue !== undefined ? car.steerValue : (controls.left ? 1 : (controls.right ? -1 : 0));
-      steerOffset = steerVal * 0.36;
+      const sv = car.steerValue !== undefined
+        ? car.steerValue
+        : (controls.left ? 1 : controls.right ? -1 : 0);
+      steerOffset = sv * 0.36;
     } else {
-      steerOffset = THREE.MathUtils.clamp((car.steerValue !== undefined ? car.steerValue : car.angularVelocity * 0.4), -0.36, 0.36);
+      steerOffset = THREE.MathUtils.clamp(
+        car.steerValue !== undefined ? car.steerValue : car.angularVelocity * 0.4,
+        -0.36, 0.36
+      );
     }
 
-    // Evaluate high-sports car realistic suspension and body pitch/roll offsets
     const suspState: SuspensionState = SuspensionSystem.calculateSuspension(
-      car,
-      elapsedSec,
-      controls,
-      steerOffset,
-      0,
-      carGroup.rotation.z,
-      carGroup.rotation.x
+      car, elapsedSec, controls, steerOffset, 0,
+      carGroup.rotation.z, carGroup.rotation.x
     );
 
-    // 1. Roll chassis body opposite to cornering force G-transfer
+    // 1. Body roll (Z-axis)
     carGroup.rotation.z = suspState.bodyRoll;
 
-    // 2. Headlight Squat (accel rear drop) and dive (brake nose dip) weight transfer
+    // 2. Body pitch (X-axis)
     carGroup.rotation.x = suspState.bodyPitch;
 
-    // 3. High-frequency chassis road vibrations
-    const suspensionVibe = Math.sin(runningTime * 45.0) * 0.006 * speedRatio;
-    carGroup.position.y += suspensionVibe;
+    // 3. Micro-vibration → rotation.x only; position.y is off-limits here
+    const suspensionVibe = Math.sin(runningTime * 45.0) * 0.004 * speedRatio;
+    carGroup.rotation.x += suspensionVibe;
 
-    // 4. Update the WheelSystem hierarchy
+    // 4. Steer + spin only — WheelSystem.update() never touches suspensionPivot.position
     if (wheelSystem) {
       const normSteer = steerOffset / 0.36;
       wheelSystem.update(car, normSteer, suspState, elapsedSec);
