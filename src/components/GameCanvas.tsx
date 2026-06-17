@@ -7,6 +7,7 @@ import { preloadGLTFAssets } from '../world/procedural';
 import { DragonTrackWorld } from '../world/DragonTrackWorld';
 import { lodManager } from '../world/lodManager';
 import { terrainManager } from '../world/terrainManager';
+import { forestSystem } from '../world/forest';
 
 // Dynamic modular systems integration
 import { VehicleRenderer } from '../systems/VehicleRenderer';
@@ -32,7 +33,6 @@ interface GameCanvasProps {
   soundEnabled?: boolean;
   timeOfDay?: 'morning' | 'noon' | 'sunset' | 'night';
   weather?: 'sunny' | 'cloudy' | 'foggy' | 'rain';
-  cameraView?: 'CLOSE' | 'MEDIUM' | 'FAR' | 'COCKPIT';
 }
 
 export const GameCanvas: React.FC<GameCanvasProps> = ({
@@ -47,7 +47,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   soundEnabled = true,
   timeOfDay = 'sunset',
   weather = 'sunny',
-  cameraView = 'MEDIUM',
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -64,7 +63,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
   const timeOfDayRef = useRef<'morning' | 'noon' | 'sunset' | 'night'>(timeOfDay);
   const weatherRef = useRef<'sunny' | 'cloudy' | 'foggy' | 'rain'>(weather);
-  const cameraViewRef = useRef<'CLOSE' | 'MEDIUM' | 'FAR' | 'COCKPIT'>(cameraView);
 
   useEffect(() => { carsRef.current = cars; }, [cars]);
   useEffect(() => { controlsRef.current = playerControls; }, [playerControls]);
@@ -75,10 +73,11 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   useEffect(() => { soundEnabledRef.current = soundEnabled; }, [soundEnabled]);
   useEffect(() => { timeOfDayRef.current = timeOfDay; }, [timeOfDay]);
   useEffect(() => { weatherRef.current = weather; }, [weather]);
-  useEffect(() => { cameraViewRef.current = cameraView; }, [cameraView]);
 
   useEffect(() => {
     if (!canvasRef.current || !containerRef.current) return;
+
+    let isUnmounted = false;
 
     // Trigger asset preloading asynchronously
     preloadGLTFAssets();
@@ -142,7 +141,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     const trailSystem = new TrailSystem(scene);
     const audioSystem = new AudioSystem();
     const vehicleEffects = new VehicleEffects(scene);
-    const cameraController = new CameraController(camera, 62);
+    const cameraController = new CameraController(camera, 62, scene);
     const vehicleRenderer = new VehicleRenderer(scene, reflectionTex);
 
     // Spawn trackside street light glow elements
@@ -179,6 +178,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     let runningTime = 0;
 
     const tick = () => {
+      if (isUnmounted) return;
       animationId = requestAnimationFrame(tick);
       const currentTime = performance.now();
       let elapsedSec = (currentTime - oldTime) / 1000;
@@ -228,6 +228,40 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
               physicsService.generateExhaustParticles(c, fixedDt);
             }
           });
+
+          // Cleanly eliminate any cars with NaN positions, out of bounds coordinates, or floating > 5m high
+          let carsFiltered = false;
+          const cleanCars = currentCars.filter((c) => {
+            if (!c || !c.position || isNaN(c.position.x) || isNaN(c.position.y) || isNaN(c.position.z)) {
+              console.warn(`Removing vehicle ${c?.id} because of NaN positions.`);
+              carsFiltered = true;
+              return false;
+            }
+
+            // Map Bounds: x: [-3000, 3000], z: [-3000, 4500]
+            if (Math.abs(c.position.x) > 3000 || c.position.z < -3000 || c.position.z > 4500) {
+              console.warn(`Removing vehicle ${c.id} because it drifted outside map bounds.`);
+              carsFiltered = true;
+              return false;
+            }
+
+            // Floating detection: check relative to road/terrain height
+            const roadY = terrainManager.queryRoadHeight(c.position);
+            const terrainY = terrainManager.getHeight(c.position.x, c.position.z);
+            const groundY = roadY !== null ? roadY : terrainY;
+            if (c.position.y > groundY + 5.0) {
+              console.warn(`Removing vehicle ${c.id} because it floated > 5.0m in the air.`);
+              carsFiltered = true;
+              return false;
+            }
+
+            return true;
+          });
+
+          if (carsFiltered) {
+            currentCars.length = 0;
+            currentCars.push(...cleanCars);
+          }
 
           physicsService.evaluatePositionsRanks(currentCars);
           particleSystemWrapper.update(physicsService, fixedDt);
@@ -282,7 +316,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         lodManager.update(pPos);
 
         // Update Camera Controller and shake rumble
-        cameraController.update(player, elapsedSec, controlsRef.current, cameraViewRef.current);
+        cameraController.update(player, elapsedSec, controlsRef.current);
 
         // Render Speed lines
         const shouldShowSpeedLines = velocityMagnitude > 40;
@@ -372,6 +406,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     resizeObs.observe(containerRef.current);
 
     return () => {
+      isUnmounted = true;
       cancelAnimationFrame(animationId);
       resizeObs.disconnect();
       renderer.dispose();
@@ -394,6 +429,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       audioSystem.destroy();
       vehicleEffects.destroy();
       vehicleRenderer.destroy();
+      forestSystem.destroy();
 
       // Geometry and materials from speed lines
       lGeo.dispose();

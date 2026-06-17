@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { TrackGeometryHelper } from '../utils/track';
 import { createProceduralRockGeo } from './procedural';
 import { buildTerrain, chunkManager } from './terrain';
-import { buildForest } from './forest';
+import { buildForest, forestSystem } from './forest';
 import { buildVillage } from './village';
 import { buildBridge } from './bridge';
 import { buildTunnel } from './tunnel';
@@ -79,6 +79,9 @@ export class DragonTrackWorld {
     if (this.animalsCtrl) {
       this.animalsCtrl.update(elapsedSec);
     }
+    
+    // Update dynamic forest system LOD ranges
+    forestSystem.update(terrainManager.playerPos);
   }
 
   private buildRoadNetwork(scene: THREE.Scene, trackHelper: TrackGeometryHelper): void {
@@ -144,44 +147,89 @@ export class DragonTrackWorld {
 
     const asphaltTex = this.createAsphaltTexture();
 
-    for (let i = 0; i <= trackSlices; i++) {
-      const u = i / trackSlices;
-      const progress = u % 1.0;
-      const pt = trackHelper.curve.getPointAt(progress);
-      const tangent = trackHelper.curve.getTangentAt(progress).normalize();
-      const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
-      
-      const width = trackHelper.getRoadWidthAt(progress);
-      const rType = trackHelper.getRoadTypeAt(progress);
+    // Helper to get smoothed road Y offset to eliminate vertical gaps at transitions
+    const getSmoothedRoadYOffset = (progressValue: number): number => {
+      let sumOffset = 0;
+      const ws = 9;
+      for (let s = -4; s <= 4; s++) {
+        const p = ((progressValue + s * 0.004) % 1.0 + 1.0) % 1.0;
+        const rType = trackHelper.getRoadTypeAt(p);
+        sumOffset += (rType === 'bridge' ? 0.3 : 0.02);
+      }
+      return sumOffset / ws;
+    };
 
-      let roadYOffset = 0.02; 
-      if (rType === 'bridge') roadYOffset = 0.3; 
+    for (let i = 0; i < trackSlices; i++) {
+      const u1 = i / trackSlices;
+      const u2 = (i + 1) / trackSlices;
+      const progress1 = u1 % 1.0;
+      const progress2 = u2 % 1.0;
+
+      const pt1 = trackHelper.curve.getPointAt(progress1);
+      const tangent1 = trackHelper.curve.getTangentAt(progress1).normalize();
+      const normal1 = new THREE.Vector3(-tangent1.z, 0, tangent1.x).normalize();
+
+      const pt2 = trackHelper.curve.getPointAt(progress2);
+      const tangent2 = trackHelper.curve.getTangentAt(progress2).normalize();
+      const normal2 = new THREE.Vector3(-tangent2.z, 0, tangent2.x).normalize();
+
+      const width1 = trackHelper.getRoadWidthAt(progress1);
+      const width2 = trackHelper.getRoadWidthAt(progress2);
+
+      const rType = trackHelper.getRoadTypeAt(progress1);
+      const roadYOffset1 = getSmoothedRoadYOffset(progress1);
+      const roadYOffset2 = getSmoothedRoadYOffset(progress2);
+
+      // We overlap adjacent segments by 0.05m total along the forward direction
+      // Move segment start backward by 0.025m and segment end forward by 0.025m
+      const pt1Overlapped = new THREE.Vector3().copy(pt1).addScaledVector(tangent1, -0.025);
+      const pt2Overlapped = new THREE.Vector3().copy(pt2).addScaledVector(tangent2, 0.025);
 
       // Left and right shoulders
-      const lPt = new THREE.Vector3().copy(pt).addScaledVector(normal, width / 2);
-      lPt.y += roadYOffset;
-      const rPt = new THREE.Vector3().copy(pt).addScaledVector(normal, -width / 2);
-      rPt.y += roadYOffset;
+      const lPt1 = new THREE.Vector3().copy(pt1Overlapped).addScaledVector(normal1, width1 / 2);
+      lPt1.y += roadYOffset1;
+      const rPt1 = new THREE.Vector3().copy(pt1Overlapped).addScaledVector(normal1, -width1 / 2);
+      rPt1.y += roadYOffset1;
 
-      roadVertices.push(lPt.x, lPt.y, lPt.z); 
-      roadVertices.push(rPt.x, rPt.y, rPt.z); 
+      const lPt2 = new THREE.Vector3().copy(pt2Overlapped).addScaledVector(normal2, width2 / 2);
+      lPt2.y += roadYOffset2;
+      const rPt2 = new THREE.Vector3().copy(pt2Overlapped).addScaledVector(normal2, -width2 / 2);
+      rPt2.y += roadYOffset2;
 
-      // Road UV: Tiling
-      const vTile = u * 52; 
-      roadUVs.push(0, vTile);
-      roadUVs.push(1, vTile);
+      // Pushing 4 vertices for this standalone overlapped segment
+      roadVertices.push(lPt1.x, lPt1.y, lPt1.z); // Vertex 0
+      roadVertices.push(rPt1.x, rPt1.y, rPt1.z); // Vertex 1
+      roadVertices.push(lPt2.x, lPt2.y, lPt2.z); // Vertex 2
+      roadVertices.push(rPt2.x, rPt2.y, rPt2.z); // Vertex 3
 
-      const centerPt = new THREE.Vector3().copy(pt);
-      centerPt.y += roadYOffset + 0.015; 
+      // UVs mapping nicely with tiling
+      const vTile1 = u1 * 52;
+      const vTile2 = u2 * 52;
+      roadUVs.push(0, vTile1);
+      roadUVs.push(1, vTile1);
+      roadUVs.push(0, vTile2);
+      roadUVs.push(1, vTile2);
+
+      const currL = i * 4;
+      const currR = i * 4 + 1;
+      const nextL = i * 4 + 2;
+      const nextR = i * 4 + 3;
+
+      roadIndices.push(currL, nextL, currR);
+      roadIndices.push(nextL, nextR, currR);
+
+      // Decorative center line points
+      const centerPt = new THREE.Vector3().copy(pt1);
+      centerPt.y += roadYOffset1 + 0.015;
       centerLinePoints.push(centerPt);
 
       // Warning Arrow board placements outside hairpin paths
       if (rType === 'hairpin' && i % 8 === 0) {
         const sign = createChevronMesh();
-        const sideSign = (pt.x > 0) ? 1 : -1; // place outer curve shoulder
-        sign.position.copy(pt).addScaledVector(normal, sideSign * (width / 2 + 1.2));
-        sign.position.y += roadYOffset;
-        sign.lookAt(new THREE.Vector3().copy(sign.position).add(normal.clone().multiplyScalar(sideSign * -1)));
+        const sideSign = (pt1.x > 0) ? 1 : -1; // place outer curve shoulder
+        sign.position.copy(pt1).addScaledVector(normal1, sideSign * (width1 / 2 + 1.2));
+        sign.position.y += roadYOffset1;
+        sign.lookAt(new THREE.Vector3().copy(sign.position).add(normal1.clone().multiplyScalar(sideSign * -1)));
         scene.add(sign);
       }
 
@@ -192,33 +240,23 @@ export class DragonTrackWorld {
         leftSkidGeo.rotateX(-Math.PI / 2);
 
         const skidL = new THREE.Mesh(leftSkidGeo, skidMat);
-        skidL.position.copy(pt).addScaledVector(normal, -trackWidth / 2);
-        skidL.position.y += roadYOffset + 0.005;
-        skidL.lookAt(new THREE.Vector3().copy(skidL.position).add(tangent));
+        skidL.position.copy(pt1).addScaledVector(normal1, -trackWidth / 2);
+        skidL.position.y += roadYOffset1 + 0.005;
+        skidL.lookAt(new THREE.Vector3().copy(skidL.position).add(tangent1));
         skidGroup.add(skidL);
 
         const skidR = new THREE.Mesh(leftSkidGeo, skidMat);
-        skidR.position.copy(pt).addScaledVector(normal, trackWidth / 2);
-        skidR.position.y += roadYOffset + 0.005;
-        skidR.lookAt(new THREE.Vector3().copy(skidR.position).add(tangent));
+        skidR.position.copy(pt1).addScaledVector(normal1, trackWidth / 2);
+        skidR.position.y += roadYOffset1 + 0.005;
+        skidR.lookAt(new THREE.Vector3().copy(skidR.position).add(tangent1));
         skidGroup.add(skidR);
       }
 
-      // Collect barrier point posts positions 
-      const isHairpinOrCliff = rType === 'hairpin' || rType === 'bridge' || (pt.y > 10);
+      // Collect barrier point posts positions
+      const isHairpinOrCliff = rType === 'hairpin' || rType === 'bridge' || (pt1.y > 10);
       if (isHairpinOrCliff && i % 4 === 0) {
-        leftBarrierPoints.push(new THREE.Vector3().copy(lPt).add(new THREE.Vector3(0, 0.4, 0)));
-        rightBarrierPoints.push(new THREE.Vector3().copy(rPt).add(new THREE.Vector3(0, 0.4, 0)));
-      }
-
-      if (i < trackSlices) {
-        const currL = i * 2;
-        const currR = i * 2 + 1;
-        const nextL = (i + 1) * 2;
-        const nextR = (i + 1) * 2 + 1;
-
-        roadIndices.push(currL, nextL, currR);
-        roadIndices.push(nextL, nextR, currR);
+        leftBarrierPoints.push(new THREE.Vector3().copy(lPt1).add(new THREE.Vector3(0, 0.4, 0)));
+        rightBarrierPoints.push(new THREE.Vector3().copy(rPt1).add(new THREE.Vector3(0, 0.4, 0)));
       }
     }
     scene.add(skidGroup);

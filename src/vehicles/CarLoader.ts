@@ -26,11 +26,31 @@ export class CarLoader {
     clonedModel.name = 'gltf_car_model';
     clonedModel.updateMatrixWorld(true);
 
+    // Ensure every mesh's geometry bounding box is computed from scratch
+    clonedModel.traverse((node) => {
+      if (node instanceof THREE.Mesh) {
+        node.geometry.computeBoundingBox();
+      }
+    });
+
     // Compute bounding box and center offsets to position the model correctly
     const box = new THREE.Box3().setFromObject(clonedModel);
     const size = box.getSize(new THREE.Vector3());
     const center = new THREE.Vector3();
     box.getCenter(center);
+
+    // Place vehicle on ground: car.position.y = -box.min.y
+    const finalY = -box.min.y;
+    console.log("[CarLoader] Car ID:", carId, "height:", size.y, "box.min.y:", box.min.y, "final y:", finalY);
+
+    clonedModel.userData.boundingBox = box;
+    clonedModel.userData.height = size.y;
+    clonedModel.userData.initialY = finalY;
+
+    // Center the chassis
+    clonedModel.position.x -= center.x;
+    clonedModel.position.z -= center.z;
+    clonedModel.position.y = finalY;
 
     // Collect wheels inside the model first
     const detectedWheels: THREE.Object3D[] = [];
@@ -53,35 +73,6 @@ export class CarLoader {
       }
     });
 
-    let lowestWheelBottom = 0;
-    if (detectedWheels.length > 0) {
-      let minY = Infinity;
-      detectedWheels.forEach((wheel) => {
-        wheel.updateMatrixWorld(true);
-        const wheelBox = new THREE.Box3().setFromObject(wheel);
-        if (wheelBox.min.y < minY) {
-          minY = wheelBox.min.y;
-        }
-      });
-      lowestWheelBottom = minY !== Infinity ? minY : box.min.y;
-    } else {
-      lowestWheelBottom = box.min.y;
-    }
-
-    const finalY = -lowestWheelBottom;
-    console.log("Car height:", size.y);
-    console.log("box.min.y:", box.min.y);
-    console.log("final y:", finalY);
-
-    clonedModel.userData.boundingBox = box;
-    clonedModel.userData.height = size.y;
-    clonedModel.userData.initialY = finalY;
-
-    // Center the chassis
-    clonedModel.position.x -= center.x;
-    clonedModel.position.z -= center.z;
-    clonedModel.position.y = finalY;
-
     // We must update the world matrix so global positions and local matrices are correct
     carGroup.add(clonedModel);
     clonedModel.updateMatrixWorld(true);
@@ -94,6 +85,7 @@ export class CarLoader {
 
     // Setup shadows and material properties
     clonedModel.traverse((node) => {
+      console.log("[GLTF Scene Traverse] Node Name:", node.name);
       if (node instanceof THREE.Mesh) {
         node.visible = true;
         node.frustumCulled = false;

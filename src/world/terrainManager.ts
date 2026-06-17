@@ -105,6 +105,10 @@ export class TerrainManager {
    * Caches track road meshes and creates boundsTree BVH hierarchies on them
    */
   public bakeRoadMeshBVH(meshes: THREE.Object3D[]): void {
+    if (this.roadBVHMesh) {
+      console.log("Road BVH already baked, skipping duplicate compilation.");
+      return;
+    }
     this.roadMeshesCache = [...meshes];
     
     // Group all mesh geometries to build a singular highly optimized collision tree

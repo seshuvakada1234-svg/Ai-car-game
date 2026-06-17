@@ -2,6 +2,10 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { CarState } from '../types';
+import { GLTFMaterialsPBRSpecularGlossinessExtension } from '../utils/carLoader';
+
+const activeDownloadPromises = new Map<string, Promise<THREE.Group>>();
+let isPreloadingStarted = false;
 
 // Shared cache for loaded GLTF models to prevent repeated network requests
 export const gltfModelCache = {
@@ -313,118 +317,136 @@ export async function loadSpecificCarModel(
     return gltfModelCache[key]!;
   }
 
-  console.log(`Downloading ${carKey} from ${url}...`);
-
-  const response = await fetch(url, {
-    method: "GET",
-    mode: "cors",
-    credentials: "omit"
-  });
-  if (!response.ok) {
-    throw new Error("Download failed");
+  if (activeDownloadPromises.has(key)) {
+    onProgress(100);
+    return activeDownloadPromises.get(key)!;
   }
 
-  const arrayBuffer = await response.arrayBuffer();
-  if (
-    arrayBuffer.byteLength < 1000 ||
-    new TextDecoder().decode(arrayBuffer.slice(0, 20)).startsWith("#")
-  ) {
-    throw new Error("File is text, not GLB");
-  }
+  const downloadPromise = (async () => {
+    console.log(`Downloading ${carKey} from ${url}...`);
 
-  const loader = new GLTFLoader();
-  const dracoLoader = new DRACOLoader();
-  dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
-  loader.setDRACOLoader(dracoLoader);
+    const response = await fetch(url, {
+      method: "GET",
+      mode: "cors",
+      credentials: "omit"
+    });
+    if (!response.ok) {
+      throw new Error("Download failed");
+    }
 
-  return new Promise<THREE.Group>((resolve, reject) => {
-    loader.parse(
-      arrayBuffer,
-      "",
-      (gltf) => {
-        try {
-          const car = gltf.scene;
-          if (!car) {
-            throw new Error("Empty model loaded");
-          }
+    const arrayBuffer = await response.arrayBuffer();
+    if (
+      arrayBuffer.byteLength < 1000 ||
+      new TextDecoder().decode(arrayBuffer.slice(0, 20)).startsWith("#")
+    ) {
+      throw new Error("File is text, not GLB");
+    }
 
-          // 6. Scale the model so it fits a realistic supercar size
-          const preBox = new THREE.Box3().setFromObject(car);
-          const preSize = preBox.getSize(new THREE.Vector3());
-          const maxDim = Math.max(preSize.x, preSize.y, preSize.z);
-          const targetScale = 4.6 / (maxDim || 1.0);
-          car.scale.setScalar(targetScale);
+    const loader = new GLTFLoader();
+    const dracoLoader = new DRACOLoader();
+    dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+    loader.setDRACOLoader(dracoLoader);
+    
+    // Register PBR specular glossiness extension support
+    loader.register((parser) => new GLTFMaterialsPBRSpecularGlossinessExtension(parser));
 
-          // 1. Compute its bounding box
-          const box = new THREE.Box3().setFromObject(car);
-          const size = box.getSize(new THREE.Vector3());
-          const center = box.getCenter(new THREE.Vector3());
-
-          car.userData.boundingBox = box;
-          car.userData.height = size.y;
-
-          // Move the car so its bottom sits on the ground:
-          car.position.y -= box.min.y;
-
-          // Center the model:
-          car.position.x -= center.x;
-          car.position.z -= center.z;
-
-          console.log(
-            "Car height:",
-            size.y,
-            "box.min.y:",
-            box.min.y,
-            "final y:",
-            car.position.y
-          );
-
-          // 9. Ensure shadows work
-          car.traverse(node => {
-            if (node instanceof THREE.Mesh) {
-              node.castShadow = true;
-              node.receiveShadow = true;
+    return new Promise<THREE.Group>((resolve, reject) => {
+      loader.parse(
+        arrayBuffer,
+        "",
+        (gltf) => {
+          try {
+            const car = gltf.scene;
+            if (!car) {
+              throw new Error("Empty model loaded");
             }
-          });
 
-          const container = new THREE.Group();
-          container.add(car);
+            // 6. Scale the model so it fits a realistic supercar size
+            const preBox = new THREE.Box3().setFromObject(car);
+            const preSize = preBox.getSize(new THREE.Vector3());
+            const maxDim = Math.max(preSize.x, preSize.y, preSize.z);
+            const targetScale = 4.6 / (maxDim || 1.0);
+            car.scale.setScalar(targetScale);
 
-          const meta = computeModelWheelOffsets(container);
-          modelWheelMetadataMap.set(url, meta);
+            // 1. Compute its bounding box
+            const box = new THREE.Box3().setFromObject(car);
+            const size = box.getSize(new THREE.Vector3());
+            const center = box.getCenter(new THREE.Vector3());
 
-          gltfModelCache[key] = container;
+            car.userData.boundingBox = box;
+            car.userData.height = size.y;
 
-          if (carKey === 'lamborghini') {
-            gltfModelCache.playerModel = container;
-          } else if (carKey === 'bugatti') {
-            gltfModelCache.bugatti_chiron = container;
-          } else if (carKey === 'ferrari') {
-            gltfModelCache.ferrari_sf90 = container;
-          } else if (carKey === 'porsche') {
-            gltfModelCache.porsche_911 = container;
+            // Move the car so its bottom sits on the ground:
+            car.position.y -= box.min.y;
+
+            // Center the model:
+            car.position.x -= center.x;
+            car.position.z -= center.z;
+
+            // Never allow: car.position.y > roadHeight + 0.1
+            if (car.position.y > 0.1) {
+              car.position.y = 0.05;
+            }
+
+            console.log(
+              "Car height:",
+              size.y,
+              "box.min.y:",
+              box.min.y,
+              "final y:",
+              car.position.y
+            );
+
+            // 9. Ensure shadows work
+            car.traverse(node => {
+              if (node instanceof THREE.Mesh) {
+                node.castShadow = true;
+                node.receiveShadow = true;
+              }
+            });
+
+            const container = new THREE.Group();
+            container.add(car);
+
+            const meta = computeModelWheelOffsets(container);
+            modelWheelMetadataMap.set(url, meta);
+
+            gltfModelCache[key] = container;
+
+            if (carKey === 'lamborghini') {
+              gltfModelCache.playerModel = container;
+            } else if (carKey === 'bugatti') {
+              gltfModelCache.bugatti_chiron = container;
+            } else if (carKey === 'ferrari') {
+              gltfModelCache.ferrari_sf90 = container;
+            } else if (carKey === 'porsche') {
+              gltfModelCache.porsche_911 = container;
+            }
+
+            playerSelectedModelKey = key;
+            gltfModelCache.isLoaded = true;
+
+            console.log(`${carKey} GLTF loaded and parsed successfully`);
+            onProgress(100);
+            resolve(container);
+          } catch (err) {
+            console.error("Error processing loaded model:", err);
+            reject(err);
+          } finally {
+            dracoLoader.dispose();
           }
-
-          playerSelectedModelKey = key;
-          gltfModelCache.isLoaded = true;
-
-          console.log(`${carKey} GLTF loaded and parsed successfully`);
-          onProgress(100);
-          resolve(container);
-        } catch (err) {
-          console.error("Error processing loaded model:", err);
-          reject(err);
-        } finally {
+        },
+        (error) => {
+          console.error(`GLTF parse failed for ${carKey}:`, error);
           dracoLoader.dispose();
+          reject(error);
         }
-      },
-      (error) => {
-        console.error(`GLTF parse failed for ${carKey}:`, error);
-        dracoLoader.dispose();
-        reject(error);
-      }
-    );
-  });
+      );
+    });
+  })();
+
+  activeDownloadPromises.set(key, downloadPromise);
+  return downloadPromise;
 }
 
 export async function loadCarModel(): Promise<THREE.Group> {
@@ -522,6 +544,11 @@ export async function loadCarModel(): Promise<THREE.Group> {
 
 // Asynchronous GLTF loader worker with DRACO support
 export const preloadGLTFAssets = async (): Promise<void> => {
+  if (isPreloadingStarted) {
+    console.log('Preload GLTF assets already triggered, skipping duplicated execution.');
+    return;
+  }
+  isPreloadingStarted = true;
   try {
     // 1. Preload Scenery model structures (Cars are loaded on-demand during selected car download)
     const sceneryLoader = new GLTFLoader();

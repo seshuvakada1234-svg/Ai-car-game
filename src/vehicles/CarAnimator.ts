@@ -15,8 +15,10 @@ export class CarAnimator {
     controls: { forward: boolean; backward: boolean; left: boolean; right: boolean; handbrake?: boolean },
     elapsedSec: number,
     runningTime: number
-  ): void {
-    if (!carGroup) return;
+  ): SuspensionState {
+    if (!carGroup) {
+      return { frontLeft: 0, frontRight: 0, rearLeft: 0, rearRight: 0, bodyRoll: 0, bodyPitch: 0 };
+    }
 
     // Smooth speed factor ratio
     const speedRatio = Math.min(1.0, Math.abs(car.speed) / 78);
@@ -56,5 +58,7 @@ export class CarAnimator {
       const normSteer = steerOffset / 0.36;
       wheelSystem.update(car, normSteer, suspState, elapsedSec);
     }
+
+    return suspState;
   }
 }

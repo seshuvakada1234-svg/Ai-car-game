@@ -43,9 +43,6 @@ export default function App() {
   // Screen orientation state
   const [isPortrait, setIsPortrait] = useState(false);
 
-  // Camera view mode state
-  const [cameraView, setCameraView] = useState<'CLOSE' | 'MEDIUM' | 'FAR' | 'COCKPIT'>('MEDIUM');
-
   // Monitor screen orientation
   useEffect(() => {
     const checkOrientation = () => {
@@ -88,12 +85,6 @@ export default function App() {
         setControls(prev => ({ ...prev, right: true }));
       } else if (e.key === ' ') {
         setControls(prev => ({ ...prev, nitro: true }));
-      } else if (key === 'c') {
-        setCameraView(prev => {
-          const modes: ('CLOSE' | 'MEDIUM' | 'FAR' | 'COCKPIT')[] = ['CLOSE', 'MEDIUM', 'FAR', 'COCKPIT'];
-          const idx = modes.indexOf(prev);
-          return modes[(idx + 1) % modes.length];
-        });
       }
     };
 
@@ -321,7 +312,6 @@ export default function App() {
           soundEnabled={soundEnabled}
           timeOfDay={timeOfDay}
           weather={weather}
-          cameraView={cameraView}
         />
       )}
 
@@ -336,8 +326,6 @@ export default function App() {
           trackHelper={trackHelperRef.current!}
           onPauseToggle={() => setIsPaused(prev => !prev)}
           isPaused={isPaused}
-          cameraView={cameraView}
-          onCameraViewChange={setCameraView}
         />
       )}
 

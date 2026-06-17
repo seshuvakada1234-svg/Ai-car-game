@@ -73,6 +73,33 @@ export class VehicleRenderer {
     weather: string,
     timeOfDay: string
   ): void {
+    // Sync 3D meshes of deleted/missing cars to prevent overlaps and floating double cars
+    const activeCarIds = new Set(cars.map(c => c.id));
+    this.carGroupMap.forEach((group, id) => {
+      if (!activeCarIds.has(id)) {
+        console.log(`Removing unregistered car representation from scene: ${id}`);
+        this.scene.remove(group);
+        this.carGroupMap.delete(id);
+        
+        this.carPivotsMap.delete(id);
+        this.carSpinnersMap.delete(id);
+        this.tailLightMatMap.delete(id);
+        this.paintMatMap.delete(id);
+        this.gltfAssetMap.delete(id);
+        
+        group.traverse((child) => {
+          if (child instanceof THREE.Mesh) {
+            child.geometry.dispose();
+            if (Array.isArray(child.material)) {
+              child.material.forEach((m) => m.dispose());
+            } else if (child.material) {
+              child.material.dispose();
+            }
+          }
+        });
+      }
+    });
+
     const needsHeadlights = timeOfDay === 'night' || weather === 'rain' || weather === 'foggy';
 
     cars.forEach((c) => {
@@ -86,24 +113,26 @@ export class VehicleRenderer {
       const carGroup = this.carGroupMap.get(c.id);
       if (!carGroup) return;
 
+      // Sync physical horizontal position and heading angle (yaw) to the visual group
+      carGroup.position.x = c.position.x;
+      carGroup.position.z = c.position.z;
+      carGroup.rotation.y = c.angle;
+
       // Determine ground/road height at this coordinate position
-      let groundY = 0;
-      try {
-        const roadHeight = terrainManager.queryRoadHeight(c.position);
-        if (roadHeight !== null) {
-          groundY = roadHeight;
-        } else {
-          groundY = terrainManager.getHeight(c.position.x, c.position.z);
+      const getGroundHeight = (x: number, z: number): number => {
+        try {
+          const tempP = new THREE.Vector3(x, 0, z);
+          const roadHeight = terrainManager.queryRoadHeight(tempP);
+          if (roadHeight !== null) {
+            return roadHeight;
+          }
+          return terrainManager.getHeight(x, z);
+        } catch (e) {
+          return c.position.y;
         }
-      } catch (e) {
-        groundY = c.position.y;
-      }
+      };
 
-      // Update basic 3D placement (using c.position.y as initial reference)
-      carGroup.position.set(c.position.x, c.position.y, c.position.z);
-
-      // Sync facing yaw angle heading
-      carGroup.rotation.set(0, c.angle, 0);
+      const groundY = getGroundHeight(c.position.x, c.position.z);
 
       const controls = c.id === 'player' ? playerControls : this._dummyControls;
       if (c.id !== 'player') {
@@ -146,7 +175,7 @@ export class VehicleRenderer {
 
       if (gltfAsset) {
         // Animate high-precision chassis & decoupled wheels using modern zero allocation structures
-        CarAnimator.animateChassis(
+        const suspState = CarAnimator.animateChassis(
           c,
           carGroup,
           gltfAsset.wheelSystem,
@@ -161,61 +190,124 @@ export class VehicleRenderer {
         gltfAsset.model.updateMatrixWorld(true);
 
         const wheels = [
-          gltfAsset.wheelSystem.frontLeft,
-          gltfAsset.wheelSystem.frontRight,
-          gltfAsset.wheelSystem.rearLeft,
-          gltfAsset.wheelSystem.rearRight
+          { assembly: gltfAsset.wheelSystem.frontLeft, key: 'fl', isFront: true },
+          { assembly: gltfAsset.wheelSystem.frontRight, key: 'fr', isFront: true },
+          { assembly: gltfAsset.wheelSystem.rearLeft, key: 'rl', isFront: false },
+          { assembly: gltfAsset.wheelSystem.rearRight, key: 'rr', isFront: false }
         ];
 
-        let lowestWheelY = Infinity;
+        // 1. Calculate ground heights at each wheel (Raycasts)
+        const scaleX = gltfAsset.model.scale.x * carGroup.scale.x;
+        const scaleY = gltfAsset.model.scale.y * carGroup.scale.y;
+        const scaleZ = gltfAsset.model.scale.z * carGroup.scale.z;
+
+        let totalTargetBodyY = 0;
         let validWheelsCount = 0;
 
-        wheels.forEach((assembly) => {
-          if (assembly && assembly.node) {
-            assembly.node.updateWorldMatrix(true, false);
-            const wheelCenter = new THREE.Vector3();
-            assembly.node.getWorldPosition(wheelCenter);
+        // Cache the calculated values to avoid re-evaluating
+        const wheelData = wheels.map((w) => {
+          const assembly = w.assembly;
+          if (!assembly) return null;
 
-            // Subtract the dynamically calculated wheelRadius adjusted by model and group scale
-            const worldRadius = assembly.wheelRadius * gltfAsset.model.scale.y * carGroup.scale.y;
-            const bottomY = wheelCenter.y - worldRadius;
+          // Locate uncompressed local wheel coordinates relative to the model
+          const localX = assembly.initialLocalPos.x * scaleX;
+          const localZ = assembly.initialLocalPos.z * scaleZ;
 
-            if (bottomY < lowestWheelY) {
-              lowestWheelY = bottomY;
-            }
-            validWheelsCount++;
+          // Yaw rotation transform to world horizontal coordinates
+          const cosA = Math.cos(c.angle);
+          const sinA = Math.sin(c.angle);
+          const worldX = c.position.x + localX * cosA + localZ * sinA;
+          const worldZ = c.position.z - localX * sinA + localZ * cosA;
 
-            // Draw visual helpers on wheel centers as requested by user
-            let sphereHelper = assembly.suspensionPivot.getObjectByName('debug_sphere') as THREE.Mesh;
-            let lineHelper = assembly.suspensionPivot.getObjectByName('debug_line') as THREE.Line;
+          // Raycast ground detection under the wheel contact
+          const wheelGroundY = getGroundHeight(worldX, worldZ);
 
-            if (!sphereHelper) {
-              const geom = new THREE.SphereGeometry(0.04, 8, 8);
-              const mat = new THREE.MeshBasicMaterial({ color: 0x39ff14, depthTest: false, transparent: true, opacity: 0.8 });
-              sphereHelper = new THREE.Mesh(geom, mat);
-              sphereHelper.name = 'debug_sphere';
-              assembly.suspensionPivot.add(sphereHelper);
-            }
-            if (!lineHelper) {
-              const linePoints = [
-                new THREE.Vector3(0, 0, 0),
-                new THREE.Vector3(0, -assembly.wheelRadius, 0)
-              ];
-              const geom = new THREE.BufferGeometry().setFromPoints(linePoints);
-              const mat = new THREE.LineBasicMaterial({ color: 0xff0055, depthTest: false, transparent: true, opacity: 0.8 });
-              lineHelper = new THREE.Line(geom, mat);
-              lineHelper.name = 'debug_line';
-              assembly.suspensionPivot.add(lineHelper);
-            }
-          }
+          // Get suspension state/height offset from physical simulation
+          let compression = 0;
+          if (w.key === 'fl') compression = suspState.frontLeft;
+          else if (w.key === 'fr') compression = suspState.frontRight;
+          else if (w.key === 'rl') compression = suspState.rearLeft;
+          else if (w.key === 'rr') compression = suspState.rearRight;
+
+          // suspensionY = compression * maxTravel (standard max travel is 0.10)
+          const suspensionHeight = compression * 0.10;
+
+          // Target Body position at this wheel = contact height + suspension height + bodyOffset (0.15m)
+          const targetBodyY = wheelGroundY + suspensionHeight + 0.15;
+          totalTargetBodyY += targetBodyY;
+          validWheelsCount++;
+
+          return {
+            assembly,
+            wheelGroundY,
+            suspensionHeight
+          };
         });
 
-        // Set visual offset on model, keeping physics group matched to actual simulator state
-        carGroup.position.y = c.position.y;
-        if (validWheelsCount > 0 && lowestWheelY !== Infinity) {
-          const gap = lowestWheelY - groundY;
-          gltfAsset.model.position.y = initialY - gap;
+        // 2. Position chassis and wheels exactly on road surface (Ground clearance 0.08m matching built-in model offset)
+        let chassisWorldY = c.position.y;
+        const roadHeightAtCenter = getGroundHeight(c.position.x, c.position.z);
+        if (chassisWorldY < roadHeightAtCenter) {
+          chassisWorldY = roadHeightAtCenter;
         }
+
+        // Apply solved chassis height to the group and the state
+        carGroup.position.y = chassisWorldY;
+        c.position.y = chassisWorldY;
+
+        // 4. Wheels touch the road surface: adjust each wheel's suspensionPivot position
+        const chassisEuler = new THREE.Euler(carGroup.rotation.x, carGroup.rotation.y, carGroup.rotation.z, 'YXZ');
+
+        wheelData.forEach((data) => {
+          if (!data) return;
+          const { assembly, wheelGroundY } = data;
+
+          // Calculate rotated mount point world Y including body roll and pitch
+          const offsetVec = assembly.initialLocalPos.clone();
+          offsetVec.x *= scaleX;
+          offsetVec.y *= scaleY;
+          offsetVec.z *= scaleZ;
+          offsetVec.applyEuler(chassisEuler);
+
+          const mountPointWorldY = chassisWorldY + offsetVec.y;
+
+          // Wheel center should be at wheelGroundY + worldRadius
+          const worldRadius = assembly.wheelRadius * scaleY;
+          const wheelCenterWorldY = wheelGroundY + worldRadius;
+
+          // Calculate local displacement to force wheel ground contact
+          let localDisplacementY = (wheelCenterWorldY - mountPointWorldY) / scaleY;
+
+          // Add limit to suspend rotation / drop if the car goes airborne
+          const localMaxTravel = 0.18;
+          localDisplacementY = THREE.MathUtils.clamp(localDisplacementY, -localMaxTravel * 0.4, localMaxTravel * 1.5);
+
+          // Update wheel assembly pivot
+          assembly.suspensionPivot.position.set(0, localDisplacementY, 0);
+
+          // Draw visual helpers on wheel centers as requested by user
+          let sphereHelper = assembly.suspensionPivot.getObjectByName('debug_sphere') as THREE.Mesh;
+          let lineHelper = assembly.suspensionPivot.getObjectByName('debug_line') as THREE.Line;
+
+          if (!sphereHelper) {
+            const geom = new THREE.SphereGeometry(0.04, 8, 8);
+            const mat = new THREE.MeshBasicMaterial({ color: 0x39ff14, depthTest: false, transparent: true, opacity: 0.8 });
+            sphereHelper = new THREE.Mesh(geom, mat);
+            sphereHelper.name = 'debug_sphere';
+            assembly.suspensionPivot.add(sphereHelper);
+          }
+          if (!lineHelper) {
+            const linePoints = [
+              new THREE.Vector3(0, 0, 0),
+              new THREE.Vector3(0, -assembly.wheelRadius, 0)
+            ];
+            const geom = new THREE.BufferGeometry().setFromPoints(linePoints);
+            const mat = new THREE.LineBasicMaterial({ color: 0xff0055, depthTest: false, transparent: true, opacity: 0.8 });
+            lineHelper = new THREE.Line(geom, mat);
+            lineHelper.name = 'debug_line';
+            assembly.suspensionPivot.add(lineHelper);
+          }
+        });
 
         // Control brake light emissions on GLTF material
         const isBraking = c.id === 'player' ? controls.backward : (c.speed < 18 && Math.random() > 0.4);
@@ -230,7 +322,34 @@ export class VehicleRenderer {
         });
       } else {
         // Fallback procedural animations
-        carGroup.position.y = groundY;
+        const cosA = Math.cos(c.angle);
+        const sinA = Math.sin(c.angle);
+
+        // Raycast heights under the four virtual coordinates in horizontal plane
+        const getFallbackGroundHeight = (lx: number, lz: number): number => {
+          const wx = c.position.x + lx * cosA + lz * sinA;
+          const wz = c.position.z - lx * sinA + lz * cosA;
+          return getGroundHeight(wx, wz);
+        };
+
+        const flG = getFallbackGroundHeight(0.95, 1.15);
+        const frG = getFallbackGroundHeight(-0.95, 1.15);
+        const rlG = getFallbackGroundHeight(1.0, -1.2);
+        const rrG = getFallbackGroundHeight(-1.0, -1.2);
+
+        // Compute average wheel heights
+        const avgG = (flG + frG + rlG + rrG) / 4;
+
+        let targetY = avgG + 0.15; // 0.15m ground clearance
+
+        // Anti-clipping constraint
+        const centerGroundY = getGroundHeight(c.position.x, c.position.z);
+        if (targetY - 0.15 < centerGroundY + 0.05) {
+          targetY = centerGroundY + 0.05 + 0.15;
+        }
+
+        carGroup.position.y = targetY;
+        c.position.y = targetY;
 
         const speedRatio = Math.min(1.0, Math.abs(c.speed) / 78);
         const rollTarget = -c.angularVelocity * 0.022 * speedRatio;

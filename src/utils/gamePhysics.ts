@@ -71,30 +71,37 @@ export class GamePhysicsService {
    * Initialises the active lineup of opponents, the player, and dense commuter traffic
    */
   public initializeCars(playerName: string, difficulty: Difficulty, playerCarColor: string): CarState[] {
-    const aiColors = ['#ff053c', '#00f6ff', '#e105ff', '#ffac05', '#02ff3c', '#ff05aa', '#02ffcc', '#ffcc02'];
-    const aiNames = ['Apex', 'Phantom', 'Nova', 'Blaze', 'Titan', 'Viper', 'Shadow', 'Storm'];
+    const aiColors = ['#ff053c', '#ffe105', '#00f6ff', '#ffa200', '#bebebe'];
+    const aiNames = ['Apex', 'Nova', 'Phantom', 'Titan', 'Shadow'];
     const result: CarState[] = [];
 
     this.carProgressHistory.clear();
     this.carHasPassedMidpoint.clear();
 
-    // 1. Setup Player Racer (Row 0, left side)
-    const playerSpawnX = -4.5;
-    const playerSpawnZ = -15;
-    const tempP3 = new THREE.Vector3(playerSpawnX, 0, playerSpawnZ);
-    const pTrackInfo = this.trackHelper.getNearestTrackInfo(tempP3);
-    const pRoadHeight = pTrackInfo ? pTrackInfo.nearestPoint.y : 0;
-    const playerSpawnY = pRoadHeight + 0.05;
+    const wheelRadius = 0.38;
+    const curveLength = this.trackHelper.curve.getLength();
+
+    // 1. Setup Player Racer (Row 0, left side, side = -1)
+    const playerProgress = (1.0 - 15.0 / curveLength) % 1.0;
+    const playerPt = this.trackHelper.curve.getPointAt(playerProgress);
+    const playerTangent = this.trackHelper.curve.getTangentAt(playerProgress).normalize();
+    const playerNormal = new THREE.Vector3(-playerTangent.z, 0, playerTangent.x).normalize();
+    const playerSpawnPos = playerPt.clone().addScaledVector(playerNormal, -2.5);
+    
+    // Set spawn height correctly on physical road
+    const playerRoadHeightTest = terrainManager.queryRoadHeight(playerSpawnPos);
+    const playerSpawnY = (playerRoadHeightTest !== null ? playerRoadHeightTest : playerPt.y) + wheelRadius;
+    const playerStartAngle = Math.atan2(playerTangent.x, playerTangent.z);
 
     result.push({
       id: 'player',
       name: playerName || 'Player',
       isAI: false,
       color: playerCarColor || '#0062ff',
-      position: { x: playerSpawnX, y: playerSpawnY, z: playerSpawnZ },
+      position: { x: playerSpawnPos.x, y: playerSpawnY, z: playerSpawnPos.z },
       velocity: { x: 0, y: 0, z: 0 },
       speed: 0,
-      angle: 0.15,
+      angle: playerStartAngle,
       angularVelocity: 0,
       driftFactor: 0,
       isDrifting: false,
@@ -113,19 +120,21 @@ export class GamePhysicsService {
       aiAggression: 0.5,
     });
 
-    // 2. Setup 8 Grid AI Competitors (Formation: 2x2 grid)
-    for (let i = 0; i < 8; i++) {
-      const gridIndex = i + 1; // 1 to 8
-      const row = Math.floor(gridIndex / 2);
-      const side = gridIndex % 2 === 0 ? -1 : 1;
+    // 2. Setup exactly 5 competitive AI Competitors (8m spacing between cars)
+    for (let i = 0; i < 5; i++) {
+      const side = (i % 2 === 0) ? 1 : -1; // Alternate right and left lanes
       
-      const offsetX = side * 4.5;
-      const offsetZ = -15 - row * 15;
+      const aiDistance = 15.0 + (i + 1) * 8.0;
+      const aiProgress = ((1.0 - aiDistance / curveLength) % 1.0 + 1.0) % 1.0;
+      const aiPt = this.trackHelper.curve.getPointAt(aiProgress);
+      const aiTangent = this.trackHelper.curve.getTangentAt(aiProgress).normalize();
+      const aiNormal = new THREE.Vector3(-aiTangent.z, 0, aiTangent.x).normalize();
+      const aiOffsetValue = side * 2.5;
 
-      const tempR3 = new THREE.Vector3(offsetX, 0, offsetZ);
-      const aiTrackInfo = this.trackHelper.getNearestTrackInfo(tempR3);
-      const aiRoadHeight = aiTrackInfo ? aiTrackInfo.nearestPoint.y : 0;
-      const aiSpawnY = aiRoadHeight + 0.05;
+      const aiSpawnPos = aiPt.clone().addScaledVector(aiNormal, aiOffsetValue);
+      const aiRoadHeightTest = terrainManager.queryRoadHeight(aiSpawnPos);
+      const aiSpawnY = (aiRoadHeightTest !== null ? aiRoadHeightTest : aiPt.y) + wheelRadius;
+      const aiStartAngle = Math.atan2(aiTangent.x, aiTangent.z);
 
       let speedFactor = 0.88;
       let aggression = 0.45;
@@ -142,10 +151,10 @@ export class GamePhysicsService {
         name: aiNames[i],
         isAI: true,
         color: aiColors[i],
-        position: { x: offsetX, y: aiSpawnY, z: offsetZ },
+        position: { x: aiSpawnPos.x, y: aiSpawnY, z: aiSpawnPos.z },
         velocity: { x: 0, y: 0, z: 0 },
         speed: 0,
-        angle: 0.15,
+        angle: aiStartAngle,
         angularVelocity: 0,
         driftFactor: 0,
         isDrifting: false,
@@ -153,7 +162,7 @@ export class GamePhysicsService {
         currentCheckpointIndex: 0,
         distanceToNextCheckpoint: 999,
         racePosition: i + 2,
-        totalDistanceTraveled: offsetZ,
+        totalDistanceTraveled: -aiDistance,
         isFinished: false,
         lastActiveTime: Date.now(),
         nitroCharged: 20 + i * 15,
@@ -170,8 +179,34 @@ export class GamePhysicsService {
     // const trafficLineup = this.trafficAIService.generateTrafficLineup();
     // result.push(...trafficLineup);
 
-    console.log(`Successfully initialized a total of ${result.length} vehicles (1 player, 8 AI rivals, 0 civilian traffic).`);
+    console.log(`Successfully initialized a total of ${result.length} vehicles (1 player, 5 AI rivals, 0 civilian traffic).`);
     return result;
+  }
+
+  /**
+   * Recovers a car immediately to its nearest track checkpoint upon out-of-bounds or NaN trigger.
+   */
+  public recoverCarToNearestCheckpoint(car: CarState) {
+    const chpts = this.trackHelper.checkpoints;
+    const chptIndex = car.currentCheckpointIndex >= 0 && car.currentCheckpointIndex < chpts.length ? car.currentCheckpointIndex : 0;
+    const chpt = chpts[chptIndex];
+    if (!chpt) return;
+
+    console.warn(`[Auto-Recovery] Teleported ${car.name || car.id} to checkpoint [${chptIndex}] due to NaN, flying or sinking.`);
+    
+    const wheelRadius = 0.38;
+    car.position.x = chpt.position.x;
+    car.position.z = chpt.position.z;
+    car.position.y = chpt.position.y + wheelRadius;
+    
+    car.velocity.x = 0;
+    car.velocity.y = 0;
+    car.velocity.z = 0;
+    car.speed = 0;
+    car.angularVelocity = 0;
+    car.driftFactor = 0;
+    car.isDrifting = false;
+    car.angle = Math.atan2(chpt.direction.x, chpt.direction.z);
   }
 
   /**
@@ -191,6 +226,20 @@ export class GamePhysicsService {
       car.velocity = { x: 0, y: 0, z: 0 };
       car.isNitroActive = false;
       return;
+    }
+
+    // --- AUTO RECOVERY CHECKS ---
+    const posCheckObj = GamePhysicsService._vecA.set(car.position.x, car.position.y, car.position.z);
+    const hasNan = isNaN(car.position.x) || isNaN(car.position.y) || isNaN(car.position.z);
+    if (hasNan) {
+      this.recoverCarToNearestCheckpoint(car);
+    } else {
+      const nearestInfo = this.trackHelper.getNearestTrackInfo(posCheckObj, car.id);
+      const roadHeight = nearestInfo ? nearestInfo.nearestPoint.y : 0;
+      const relativeY = car.position.y - roadHeight;
+      if (relativeY > 5.0 || relativeY < -2.0) {
+        this.recoverCarToNearestCheckpoint(car);
+      }
     }
 
     const currentGear = controls.gear || 'D';
@@ -414,60 +463,52 @@ export class GamePhysicsService {
     const bvhRoadY = terrainManager.queryRoadHeight(pos3);
     const terrainY = terrainManager.getHeight(car.position.x, car.position.z);
     
-    let roadY = trackInfo.nearestPoint.y + 0.05;
+    let roadY = trackInfo.nearestPoint.y;
     if (bvhRoadY !== null) {
-      roadY = bvhRoadY + 0.05;
+      roadY = bvhRoadY;
     } else {
       // If outside RoadBVH mesh for some reason, use track spline or terrain height
       if (trackInfo.distanceToTrack < trackInfo.width / 2 + 3) {
-        roadY = trackInfo.nearestPoint.y + 0.05;
+        roadY = trackInfo.nearestPoint.y;
       } else {
-        roadY = terrainY + 0.05;
+        roadY = terrainY;
       }
     }
     
-    // Road must always have higher priority than terrain, but prevent falling below terrain
-    const minHeight = Math.max(roadY, terrainY + 0.05);
+    // Ground level is the road surface height (or terrain height if off-road)
+    const minHeight = Math.max(roadY, terrainY);
+
+    // If airborne distance > 0.3m, automatically reposition vehicle flat on the road surface
+    const airborneDist = car.position.y - minHeight;
+    if (airborneDist > 0.3) {
+      car.position.y = minHeight;
+      car.velocity.y = 0;
+    }
 
     // Realistic Continuous Downforce: F_downforce = -0.022 * v^2 to keep cars extremely planted at speed
     const downforceY = -0.022 * car.speed * car.speed;
 
-    // Vertical physics integration
+    // Apply high-sport suspension damping & spring force (Keep constant ride height, apply suspension damping)
     if (car.position.y <= minHeight + 0.15) {
-      const springK = 180.0;     // high-stiffness GT3 racing spring rate
-      const dampC = 16.0;        // heavy race dampers to prevent oscillations
+      const springK = 250.0;     // high-stiffness sport spring
+      const dampC = 20.0;        // heavy damping to keep car flat and eliminate vertical oscillations
       
       // Net vertical acceleration: Spring force (Hooke's Law) + Damping force + Downforce
-      // a_y = k * (roadY - y) - c * v_y + downforce
       const accelY = (minHeight - car.position.y) * springK - dampC * car.velocity.y + downforceY;
       
-      // Update velocity using dt
       car.velocity.y += accelY * dt;
     } else {
-      // Airborne gravity
+      // Airborne gravity (if within the 0.3m limit)
       const gravity = 28.0;      // strong realistic gravity
-      // In air, we apply downforce too (for wing aero downforce)
       car.velocity.y += (-gravity + downforceY * 0.5) * dt;
-      if (car.velocity.y < -45) car.velocity.y = -45; // terminal velocity limit
     }
 
     car.position.y += car.velocity.y * dt;
 
-    // Secure bottom constraints to absolutely prevent sinking under bridges
+    // Hard constraint: Bottom of car/tires must touch the road surface (No sinking)
     if (car.position.y < minHeight) {
       car.position.y = minHeight;
       car.velocity.y = Math.max(0, car.velocity.y);
-    }
-
-    // Soft height constraints and damping instead of hard teleports:
-    if (car.position.y > minHeight + 1.2) {
-      // Gentle soft damping of upward velocity
-      if (car.velocity.y > 0) {
-        car.velocity.y *= Math.exp(-12.0 * dt);
-      }
-      // Apply a restorative force to pull the car back down
-      const heightOffset = car.position.y - (minHeight + 1.2);
-      car.velocity.y -= heightOffset * 35.0 * dt;
     }
 
     // --- 7. SOLID GUARDRAIL CONTACT RESOLUTONS ---
