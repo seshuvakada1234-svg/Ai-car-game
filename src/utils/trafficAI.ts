@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { CarState, ControlsState } from '../types';
 import { TrackGeometryHelper } from './track';
+import { MemoryPool } from './memoryPool';
 
 export class TrafficAIService {
   private trackHelper: TrackGeometryHelper;
@@ -98,7 +99,7 @@ export class TrafficAIService {
     dt: number,
     otherCars: CarState[]
   ): ControlsState {
-    const pos3 = new THREE.Vector3(car.position.x, car.position.y, car.position.z);
+    const pos3 = MemoryPool.getVector().set(car.position.x, car.position.y, car.position.z);
     const trackInfo = this.trackHelper.getNearestTrackInfo(pos3, car.id);
 
     // 1. Dynamic Lookahead point calculated relative to speed
@@ -107,7 +108,7 @@ export class TrafficAIService {
 
     const targetSplinePt = this.trackHelper.curve.getPointAt(targetU);
     const tangentAhead = this.trackHelper.curve.getTangentAt(targetU).normalize();
-    const normalAhead = new THREE.Vector3(-tangentAhead.z, 0, tangentAhead.x).normalize();
+    const normalAhead = MemoryPool.getVector().set(-tangentAhead.z, 0, tangentAhead.x).normalize();
 
     // 2. Stay primarily in designated lane
     const tIndex = parseInt(car.id.replace('traffic_', '')) || 0;

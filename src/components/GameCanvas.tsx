@@ -1,13 +1,15 @@
 import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { CarState, ControlsState } from '../types';
-import { GamePhysicsService } from '../utils/gamePhysics';
+import { GamePhysicsService } from '../physics/GamePhysics';
+import { TrafficAIService } from '../ai/TrafficAI';
 import { TrackGeometryHelper } from '../utils/track';
 import { preloadGLTFAssets } from '../world/procedural';
 import { DragonTrackWorld } from '../world/DragonTrackWorld';
 import { lodManager } from '../world/lodManager';
-import { terrainManager } from '../world/terrainManager';
+import { terrainManager } from '../world/TerrainManager';
 import { forestSystem } from '../world/forest';
+import { MemoryPool } from '../utils/memoryPool';
 
 // Dynamic modular systems integration
 import { VehicleRenderer } from '../systems/VehicleRenderer';
@@ -143,6 +145,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     const vehicleEffects = new VehicleEffects(scene);
     const cameraController = new CameraController(camera, 62, scene);
     const vehicleRenderer = new VehicleRenderer(scene, reflectionTex);
+    const trafficAIService = new TrafficAIService(trackHelper);
 
     // Spawn trackside street light glow elements
     trackHelper.lights.forEach((lite) => {
@@ -182,7 +185,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       animationId = requestAnimationFrame(tick);
       const currentTime = performance.now();
       let elapsedSec = (currentTime - oldTime) / 1000;
-      if (elapsedSec > 0.1) elapsedSec = 0.1;
+      elapsedSec = Math.min(elapsedSec, 0.05);
       oldTime = currentTime;
 
       const currentCars = carsRef.current ? [...carsRef.current] : [];
@@ -224,44 +227,44 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
           currentCars.forEach((c) => {
             if (c && c.position && c.velocity && c.isAI) {
-              physicsService.updateAICar(c, fixedDt, currentCars);
+              trafficAIService.updateAICar(c, fixedDt, currentCars, physicsService);
               physicsService.generateExhaustParticles(c, fixedDt);
             }
           });
 
-          // Cleanly eliminate any cars with NaN positions, out of bounds coordinates, or floating > 5m high
-          let carsFiltered = false;
-          const cleanCars = currentCars.filter((c) => {
-            if (!c || !c.position || isNaN(c.position.x) || isNaN(c.position.y) || isNaN(c.position.z)) {
-              console.warn(`Removing vehicle ${c?.id} because of NaN positions.`);
-              carsFiltered = true;
-              return false;
+          // Cleanly heal/recover any cars with NaN positions, out of bounds coordinates, or floating > 5m high
+          currentCars.forEach((c) => {
+            if (!c || !c.position) return;
+
+            if (isNaN(c.position.x) || isNaN(c.position.y) || isNaN(c.position.z)) {
+              console.warn(`Healing vehicle ${c.id} due to NaN positions.`);
+              c.position.x = 0;
+              c.position.y = 0;
+              c.position.z = 0;
+              c.velocity = { x: 0, y: 0, z: 0 };
+              c.speed = 0;
+              c.angle = 0;
+              c.angularVelocity = 0;
+              physicsService.recoverCarToNearestCheckpoint(c);
+              return;
             }
 
-            // Map Bounds: x: [-3000, 3000], z: [-3000, 4500]
+            // Map Bounds Check
             if (Math.abs(c.position.x) > 3000 || c.position.z < -3000 || c.position.z > 4500) {
-              console.warn(`Removing vehicle ${c.id} because it drifted outside map bounds.`);
-              carsFiltered = true;
-              return false;
+              console.warn(`Healing vehicle ${c.id} because it drifted outside map bounds.`);
+              physicsService.recoverCarToNearestCheckpoint(c);
+              return;
             }
 
-            // Floating detection: check relative to road/terrain height
+            // Floating detection: check height relative to ground/road
             const roadY = terrainManager.queryRoadHeight(c.position);
             const terrainY = terrainManager.getHeight(c.position.x, c.position.z);
             const groundY = roadY !== null ? roadY : terrainY;
             if (c.position.y > groundY + 5.0) {
-              console.warn(`Removing vehicle ${c.id} because it floated > 5.0m in the air.`);
-              carsFiltered = true;
-              return false;
+              console.warn(`Healing vehicle ${c.id} because it floated > 5.0m in the air.`);
+              physicsService.recoverCarToNearestCheckpoint(c);
             }
-
-            return true;
           });
-
-          if (carsFiltered) {
-            currentCars.length = 0;
-            currentCars.push(...cleanCars);
-          }
 
           physicsService.evaluatePositionsRanks(currentCars);
           particleSystemWrapper.update(physicsService, fixedDt);
@@ -279,7 +282,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       if (player && player.position) {
         const isFinished = player ? player.isFinished : false;
         const rank = player ? player.racePosition : 1;
-        dragonWorld.update(elapsedSec, trackHelper, rank, isFinished);
+        dragonWorld.update(elapsedSec, trackHelper, rank, isFinished, activeWeather);
       }
 
       // Animate Vehicles and Wheels
@@ -311,7 +314,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         const velocityMagnitude = player.velocity ? Math.sqrt(player.velocity.x ** 2 + player.velocity.z ** 2) : 0;
 
         // Level Of Detail dynamic geometry culling around player's position
-        const pPos = new THREE.Vector3(player.position.x, player.position.y, player.position.z);
+        const pPos = MemoryPool.getVector().set(player.position.x, player.position.y, player.position.z);
         terrainManager.playerPos.copy(pPos);
         lodManager.update(pPos);
 

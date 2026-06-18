@@ -109,11 +109,9 @@ export class TerrainManager {
     }
     this.roadMeshesCache = [...meshes];
     
-    // Group all mesh geometries to build a singular highly optimized collision tree
     const geometriesToMerge: THREE.BufferGeometry[] = [];
     meshes.forEach(m => {
       if (m instanceof THREE.Mesh) {
-        // Clone and apply world transformation
         m.updateMatrixWorld(true);
         const geom = m.geometry.clone();
         geom.applyMatrix4(m.matrixWorld);
@@ -130,12 +128,10 @@ export class TerrainManager {
           mergedGeom = mergeGeometries(geometriesToMerge, false);
         }
         if (mergedGeom) {
-          // Build MeshBVH
           (mergedGeom as any).boundsTree = new MeshBVH(mergedGeom);
           this.roadBVHMesh = new THREE.Mesh(mergedGeom, new THREE.MeshBasicMaterial());
         }
       } catch (err) {
-        // Fallback: build boundsTree directly on individual meshes in cache
         meshes.forEach(m => {
           if (m instanceof THREE.Mesh && m.geometry) {
             try {
@@ -156,7 +152,6 @@ export class TerrainManager {
       return null;
     }
 
-    // 0.2 meters grid resolution hash
     const qx = Math.round(pos.x * 5);
     const qz = Math.round(pos.z * 5);
     const key = (qx * 73856093) ^ (qz * 19349663);
@@ -176,8 +171,6 @@ export class TerrainManager {
       raycaster.set(rayOrigin, rayDir);
       raycaster.near = 0.0;
       raycaster.far = 150.0;
-      
-      // Configure raycast for BVH-first traversal
       raycaster.firstHitOnly = true;
 
       let resultHeight: number | null = null;
@@ -232,4 +225,5 @@ export class TerrainManager {
     this.trackHelper = null;
   }
 }
+
 export const terrainManager = TerrainManager.getInstance();

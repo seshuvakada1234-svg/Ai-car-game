@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { TrackGeometryHelper } from '../utils/track';
-import { terrainManager } from './terrainManager';
+import { terrainManager } from './TerrainManager';
 import { lodManager } from './lodManager';
 
 export function buildVillage(scene: THREE.Scene, trackHelper: TrackGeometryHelper): void {

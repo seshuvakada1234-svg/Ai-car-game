@@ -2,7 +2,57 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { CarState } from '../types';
-import { GLTFMaterialsPBRSpecularGlossinessExtension } from '../utils/carLoader';
+
+class GLTFMaterialsPBRSpecularGlossinessExtension {
+  public name = 'KHR_materials_pbrSpecularGlossiness';
+  public parser: any;
+
+  constructor(parser: any) {
+    this.parser = parser;
+  }
+
+  public getMaterialType(materialIndex: number) {
+    const parser = this.parser;
+    const materialDef = parser.json.materials[materialIndex];
+    if (!materialDef.extensions || !materialDef.extensions[this.name]) return null;
+    return THREE.MeshStandardMaterial;
+  }
+
+  public extendMaterialParams(materialIndex: number, materialParams: any) {
+    const parser = this.parser;
+    const materialDef = parser.json.materials[materialIndex];
+    if (!materialDef.extensions || !materialDef.extensions[this.name]) return Promise.resolve();
+
+    const pending: Promise<any>[] = [];
+    const extension = materialDef.extensions[this.name];
+
+    materialParams.color = new THREE.Color(1.0, 1.0, 1.0);
+    materialParams.opacity = 1.0;
+
+    if (Array.isArray(extension.diffuseFactor)) {
+      const f = extension.diffuseFactor;
+      materialParams.color.fromArray(f);
+      materialParams.opacity = f[3];
+    }
+
+    if (extension.diffuseTexture !== undefined) {
+      pending.push(parser.assignTexture(materialParams, 'map', extension.diffuseTexture));
+    }
+
+    let glossiness = 1.0;
+    if (extension.glossinessFactor !== undefined) {
+      glossiness = extension.glossinessFactor;
+    }
+    materialParams.roughness = 1.0 - glossiness;
+    materialParams.metalness = 0.0;
+
+    if (extension.specularGlossinessTexture !== undefined) {
+      pending.push(parser.assignTexture(materialParams, 'roughnessMap', extension.specularGlossinessTexture));
+    }
+
+    return Promise.all(pending);
+  }
+}
 
 const activeDownloadPromises = new Map<string, Promise<THREE.Group>>();
 let isPreloadingStarted = false;

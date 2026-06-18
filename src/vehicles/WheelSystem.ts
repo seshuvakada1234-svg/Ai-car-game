@@ -57,11 +57,7 @@ export class WheelSystem {
       }
     });
 
-    // ── Debug: list every candidate so we can spot wrong nodes ───────────────
-    console.log(`[WheelSystem] ${candidates.length} wheel candidate(s) found:`);
-    candidates.forEach((node) => {
-      console.log('[Wheel Candidate]', node.name, '| type:', node.type);
-    });
+
 
     let flTarget = new THREE.Vector3( 0.95, 0.38,  1.15);
     let frTarget = new THREE.Vector3(-0.95, 0.38,  1.15);
@@ -99,28 +95,14 @@ export class WheelSystem {
       }
     });
 
-    // ── Debug: confirm which node was chosen per corner ───────────────────────
-    console.log('FL =', flNode ? (flNode as THREE.Object3D).name : 'NOT FOUND');
-    console.log('FR =', frNode ? (frNode as THREE.Object3D).name : 'NOT FOUND');
-    console.log('RL =', rlNode ? (rlNode as THREE.Object3D).name : 'NOT FOUND');
-    console.log('RR =', rrNode ? (rrNode as THREE.Object3D).name : 'NOT FOUND');
+
 
     this.frontLeft  = this.setupAssembly(flNode, 'frontLeft',  modelRoot);
     this.frontRight = this.setupAssembly(frNode, 'frontRight', modelRoot);
     this.rearLeft   = this.setupAssembly(rlNode, 'rearLeft',   modelRoot);
     this.rearRight  = this.setupAssembly(rrNode, 'rearRight',  modelRoot);
 
-    // ── Debug: final radii summary ────────────────────────────────────────────
-    const dbg = (n: string, a: WheelAssembly | null) =>
-      a ? console.log(`[WheelSystem] ${n} radius: ${a.wheelRadius.toFixed(4)}m`)
-        : console.warn(`[WheelSystem] ${n}: NOT DETECTED`);
-    dbg('FL', this.frontLeft);  dbg('FR', this.frontRight);
-    dbg('RL', this.rearLeft);   dbg('RR', this.rearRight);
 
-    console.log(`[WheelSystem] FL radius=${this.frontLeft?.wheelRadius}`);
-    console.log(`[WheelSystem] FR radius=${this.frontRight?.wheelRadius}`);
-    console.log(`[WheelSystem] RL radius=${this.rearLeft?.wheelRadius}`);
-    console.log(`[WheelSystem] RR radius=${this.rearRight?.wheelRadius}`);
   }
 
   private setupAssembly(
@@ -229,7 +211,7 @@ export class WheelSystem {
     const rollingDiameter = dims[1]; // second largest = tyre diameter
     const wheelRadius = THREE.MathUtils.clamp(rollingDiameter * 0.5, 0.28, 0.48);
 
-    console.log(`[${name}] size=`, size, `radius=${wheelRadius}`);
+
 
     // Spin axis = direction of the smallest dimension (the axle)
     const localSpinAxis = new THREE.Vector3(1, 0, 0);

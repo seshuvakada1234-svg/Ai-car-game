@@ -61,13 +61,7 @@ export class CarLoader {
     // Place chassis so its bottom rests at Y=0
     const finalY = -box.min.y;
 
-    console.log('[CarLoader]', {
-      id: carId,
-      boxMinY: box.min.y,
-      boxMaxY: box.max.y,
-      finalY,
-      height: size.y,
-    });
+
 
     clonedModel.userData.boundingBox = box;
     clonedModel.userData.height      = size.y;
@@ -102,7 +96,7 @@ export class CarLoader {
     const headlights:  THREE.Mesh[]     = [];
 
     clonedModel.traverse((node) => {
-      console.log('[GLTF Scene Traverse] Node Name:', node.name);
+
       if (node instanceof THREE.Mesh) {
         node.visible       = true;
         node.frustumCulled = false;

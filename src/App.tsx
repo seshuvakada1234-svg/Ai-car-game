@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { GamePhase, GameSettings, CarState, ControlsState } from './types';
 import { TrackGeometryHelper } from './utils/track';
-import { GamePhysicsService } from './utils/gamePhysics';
+import { GamePhysicsService } from './physics/GamePhysics';
 import { GameCanvas } from './components/GameCanvas';
 import { HUD } from './components/HUD';
 import { Menu } from './components/Menu';
@@ -122,22 +122,20 @@ export default function App() {
         }
 
         setCountdown(prev => {
-          if (prev === 3) {
-            setCountdownMsg('3');
-            return 2;
-          }
-          if (prev === 2) {
-            setCountdownMsg('2');
-            return 1;
-          }
-          if (prev === 1) {
-            setCountdownMsg('GO!');
-            return 0;
-          }
-          // Wrap up countdown
-          setPhase('racing');
-          lastTimeRef.current = Date.now();
-          return 0;
+          const next = prev - 1;
+          setTimeout(() => {
+            if (next === 2) {
+              setCountdownMsg('3');
+            } else if (next === 1) {
+              setCountdownMsg('2');
+            } else if (next === 0) {
+              setCountdownMsg('GO!');
+            } else if (next < 0) {
+              setPhase('racing');
+              lastTimeRef.current = Date.now();
+            }
+          }, 0);
+          return next;
         });
       };
 

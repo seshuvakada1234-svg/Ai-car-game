@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { CarState } from '../types';
 import { SpatialGrid } from './spatialGrid';
+import { MemoryPool } from './memoryPool';
 
 export class CarCollisionSystem {
   private static readonly COLLISION_RADIUS = 1.85; // realistic bumper bounds (width 1.95m, length 4.5m sphere footprint equivalent)
@@ -136,8 +137,8 @@ export class CarCollisionSystem {
       car.position.z = trackInfo.nearestPoint.z + trackInfo.normal.z * allowedOffset * sign;
 
       // Soft Elastic Ricochet Rebound opposite to boundary normal vector
-      const velVec = new THREE.Vector3(car.velocity.x, 0, car.velocity.z);
-      const normalVec = new THREE.Vector3(trackInfo.normal.x, 0, trackInfo.normal.z).multiplyScalar(sign);
+      const velVec = MemoryPool.getVector().set(car.velocity.x, 0, car.velocity.z);
+      const normalVec = MemoryPool.getVector().set(trackInfo.normal.x, 0, trackInfo.normal.z).multiplyScalar(sign);
 
       const vNormalDot = velVec.dot(normalVec);
       if (vNormalDot > 0) { // moving towards the wall boundary

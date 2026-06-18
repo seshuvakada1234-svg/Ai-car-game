@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { TrackGeometryHelper } from '../utils/track';
-import { terrainManager } from './terrainManager';
+import { terrainManager } from './TerrainManager';
 import { lodManager } from './lodManager';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
@@ -19,9 +19,41 @@ interface ExtractedSubmesh {
   localMatrix: THREE.Matrix4;
 }
 
+// Compact, performant, Zero-allocation Perlin-Noise implementation to map organic clusters
+class SimpleNoise {
+  private static hash2D(x: number, y: number): number {
+    const n = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453123;
+    return n - Math.floor(n);
+  }
+
+  private static fade(t: number): number {
+    return t * t * t * (t * (t * 6 - 15) + 10);
+  }
+
+  public static noise(x: number, y: number): number {
+    const X = Math.floor(x);
+    const Y = Math.floor(y);
+    const xf = x - X;
+    const yf = y - Y;
+
+    const h00 = SimpleNoise.hash2D(X, Y);
+    const h10 = SimpleNoise.hash2D(X + 1, Y);
+    const h01 = SimpleNoise.hash2D(X, Y + 1);
+    const h11 = SimpleNoise.hash2D(X + 1, Y + 1);
+
+    const u = SimpleNoise.fade(xf);
+    const v = SimpleNoise.fade(yf);
+
+    const a = h00 * (1 - u) + h10 * u;
+    const b = h01 * (1 - u) + h11 * u;
+    return a * (1 - v) + b * v;
+  }
+}
+
 class ForestSystem {
   private static instance: ForestSystem | null = null;
 
+  // Active forest coordinates
   private trees: ForestTree[] = [];
   private treesByType: ForestTree[][] = [[], [], [], []];
 
@@ -35,9 +67,16 @@ class ForestSystem {
   private isLoaded: boolean[] = [false, false, false, false];
   private isInitialized = false;
   private static readonly treeCache = new Map<string, THREE.Group>();
+  private static readonly activeDownloads = new Set<string>();
+
+  // Roadside vegetation (Nature Pack)
+  private roadsideCoords: { position: THREE.Vector3; scale: number; rotationY: number }[][] = [[], [], [], [], []]; // 0: Grass, 1: Flower, 2: Bush, 3: Plant, 4: Rock
+  private roadsideInsts: THREE.InstancedMesh[][] = [[], [], [], [], []];
+  private naturePackSubmeshes: ExtractedSubmesh[][] = [[], [], [], [], []];
+  private isNaturePackLoaded = false;
 
   private lastCameraPos = new THREE.Vector3(Infinity, Infinity, Infinity);
-  private updateFrameCounter = 0;
+  private lastUpdateTime = 0;
   private scene: THREE.Scene | null = null;
   private trackHelper: TrackGeometryHelper | null = null;
 
@@ -75,89 +114,268 @@ class ForestSystem {
     this.lowInsts = [];
     this.gltfSubmeshes = [[], [], [], []];
     this.isLoaded = [false, false, false, false];
+
+    this.roadsideCoords = [[], [], [], [], []];
+    this.roadsideInsts = [[], [], [], [], []];
+    this.naturePackSubmeshes = [[], [], [], [], []];
+    this.isNaturePackLoaded = false;
+
     this.lastCameraPos.set(Infinity, Infinity, Infinity);
-    this.updateFrameCounter = 0;
+    this.lastUpdateTime = 0;
 
-    console.log('Initializing Forest System...');
+    console.log('Initializing AAA Forest System...');
 
-    // 1. Filter, distribute, and populate tree coordinates following strict road and landscape rules
-    const rawTrees = trackHelper.trees;
+    // 1. Generate organic, highly realistic forest coordinates using Perlin-style noise probability maps
+    console.log('Generating organic forest trees around active loop corridors...');
+    
+    // Sample the spline curve to construct the natural gameplay corridors
+    const steps = 1200;
     let treeIdCounter = 0;
 
-    rawTrees.forEach((t) => {
-      // Enforce scale boundaries as requested by user
-      const tScale = 0.8 + Math.random() * 0.7; // 0.8 to 1.5
-      const tRotY = Math.random() * Math.PI * 2; // 0 to 360 deg
+    for (let j = 0; j < steps; j++) {
+      const u = j / steps;
+      const pt = trackHelper.curve.getPointAt(u);
+      const tangent = trackHelper.curve.getTangentAt(u).normalize();
+      const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
+      const roadWidth = trackHelper.getRoadWidthAt(u);
+      const rType = trackHelper.getRoadTypeAt(u);
 
-      // STRICT ROAD RULES & COLLISION EXCLUSIONS:
-      // Minimum distance from road is Road Edge + 15 meters
-      const tInfo = trackHelper.getNearestTrackInfo(t.position);
-      if (tInfo && tInfo.nearestPoint) {
-        const roadWidth = trackHelper.getRoadWidthAt(tInfo.progress);
-        const minDistanceAllowed = roadWidth / 2 + 15.0; // Keep at least Road edge + 15 meters
-        if (tInfo.distanceToTrack < minDistanceAllowed) {
-          return; // Skip tree!
-        }
-
-        // FOREST DENSITY gradient check based on spatial distance to road corridor
-        const distFromRoadEdge = tInfo.distanceToTrack - roadWidth / 2;
-        if (distFromRoadEdge < 35.0) {
-          // Near roads: Sparse Forest (keep only 18%)
-          if (Math.random() > 0.18) return;
-        } else if (distFromRoadEdge < 75.0) {
-          // Middle distance: Medium Density (keep 50%)
-          if (Math.random() > 0.50) return;
-        }
-        // Far distance: Dense Forest (keeps 100% of generated landscape trees!)
+      // Bridges have strictly NO trees
+      if (rType === 'bridge') {
+        continue;
       }
 
-      // Prevent intersections with major landmarks/buildings to guarantee no floating or structural overlaps
-      const pagodaDistance = t.position.distanceTo(trackHelper.pagodaPos);
-      if (pagodaDistance < 40.0) return; // Skip near starting village pagoda
+      for (let side of [-1, 1]) {
+        // Query local spatial noise value for organic clusters/glade designs
+        const localNoise = SimpleNoise.noise(pt.x / 140.0, pt.z / 140.0);
 
-      const waterfallDistance = t.position.distanceTo(trackHelper.waterfallPos);
-      if (waterfallDistance < 45.0) return; // Skip inside waterfall plunge pool/mill
+        // --- BAND 1: Sparse Corridor (15m to 60m from road edge) ---
+        if (Math.random() < 0.12 * (localNoise * 0.8 + 0.2)) {
+          const minCorrd = roadWidth / 2 + 15.0;
+          const maxCorrd = roadWidth / 2 + 60.0;
+          const perpOffset = minCorrd + Math.random() * (maxCorrd - minCorrd);
+          const tangentJitter = (Math.random() * 2.0 - 1.0) * 4.0;
 
-      // Select type safely mapped to 0-3
-      const mappedType = t.type % 4;
+          const pos = new THREE.Vector3()
+            .copy(pt)
+            .addScaledVector(normal, side * perpOffset)
+            .addScaledVector(tangent, tangentJitter);
 
-      const newTree: ForestTree = {
-        id: treeIdCounter++,
-        position: t.position.clone(),
-        scale: tScale,
-        rotationY: tRotY,
-        type: mappedType
-      };
+          pos.y = terrainManager.getHeight(pos.x, pos.z);
 
-      // Perfect alignment on terrain height
-      newTree.position.y = terrainManager.getHeight(newTree.position.x, newTree.position.z);
+          if (this.isValidTreeLocation(pos, u, trackHelper)) {
+            const mappedType = treeIdCounter % 4; // 0=Pine, 1=Old, 2=Sakura, 3=GN
+            const tScale = 0.8 + Math.random() * 0.7; // 0.8 to 1.5
+            const tRotY = Math.random() * Math.PI * 2; // 0 to 360 deg
 
-      this.trees.push(newTree);
-      this.treesByType[mappedType].push(newTree);
-    });
+            const newTree: ForestTree = {
+              id: treeIdCounter++,
+              position: pos,
+              scale: tScale,
+              rotationY: tRotY,
+              type: mappedType
+            };
+            this.trees.push(newTree);
+            this.treesByType[mappedType].push(newTree);
+          }
+        }
 
-    console.log(`Forest populated: Total of ${this.trees.length} valid trees arranged into organic clusters!`);
+        // --- BAND 2: Medium Corridor (60m to 200m from road edge) ---
+        const medNoise = SimpleNoise.noise(pt.x / 90.0, pt.z / 90.0);
+        if (Math.random() < 0.38 * medNoise) {
+          const minCorrd = roadWidth / 2 + 60.0;
+          const maxCorrd = roadWidth / 2 + 200.0;
+          const attempts = 2;
+          for (let att = 0; att < attempts; att++) {
+            const perpOffset = minCorrd + Math.random() * (maxCorrd - minCorrd);
+            const tangentJitter = (Math.random() * 2.0 - 1.0) * 12.0;
 
-    // 2. Pre-create High-LOD placeholder instanced meshes (for immediate responsive loading, swapped in background)
+            const pos = new THREE.Vector3()
+              .copy(pt)
+              .addScaledVector(normal, side * perpOffset)
+              .addScaledVector(tangent, tangentJitter);
+
+            pos.y = terrainManager.getHeight(pos.x, pos.z);
+
+            if (this.isValidTreeLocation(pos, u, trackHelper)) {
+              const mappedType = treeIdCounter % 4;
+              const tScale = 0.8 + Math.random() * 0.7;
+              const tRotY = Math.random() * Math.PI * 2;
+
+              const newTree: ForestTree = {
+                id: treeIdCounter++,
+                position: pos,
+                scale: tScale,
+                rotationY: tRotY,
+                type: mappedType
+              };
+              this.trees.push(newTree);
+              this.treesByType[mappedType].push(newTree);
+            }
+          }
+        }
+
+        // --- BAND 3: Dense Corridor (200m to 800m from road edge) ---
+        const wideNoise = SimpleNoise.noise(pt.x / 180.0, pt.z / 180.0);
+        if (Math.random() < 0.75 * wideNoise) {
+          const minCorrd = roadWidth / 2 + 200.0;
+          const maxCorrd = roadWidth / 2 + 800.0;
+          const attempts = 4;
+          for (let att = 0; att < attempts; att++) {
+            const perpOffset = minCorrd + Math.random() * (maxCorrd - minCorrd);
+            const tangentJitter = (Math.random() * 2.0 - 1.0) * 35.0;
+
+            const pos = new THREE.Vector3()
+              .copy(pt)
+              .addScaledVector(normal, side * perpOffset)
+              .addScaledVector(tangent, tangentJitter);
+
+            pos.y = terrainManager.getHeight(pos.x, pos.z);
+
+            if (this.isValidTreeLocation(pos, u, trackHelper)) {
+              const mappedType = treeIdCounter % 4;
+              const tScale = 0.8 + Math.random() * 0.7;
+              const tRotY = Math.random() * Math.PI * 2;
+
+              const newTree: ForestTree = {
+                id: treeIdCounter++,
+                position: pos,
+                scale: tScale,
+                rotationY: tRotY,
+                type: mappedType
+              };
+              this.trees.push(newTree);
+              this.treesByType[mappedType].push(newTree);
+            }
+          }
+        }
+      }
+    }
+
+    console.log(`Forest populated organic: Total of ${this.trees.length} valid trees arranged into organic clusters!`);
+
+    // 2. Generate high-density continuous roadside details strips on LEFT and RIGHT sides of the road
+    console.log('Generating continuous roadside vegetation strips...');
+    for (let s = 0; s < steps; s++) {
+      const u = s / steps;
+      const pt = trackHelper.curve.getPointAt(u);
+      const tangent = trackHelper.curve.getTangentAt(u).normalize();
+      const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
+      const roadWidth = trackHelper.getRoadWidthAt(u);
+      const rType = trackHelper.getRoadTypeAt(u);
+
+      if (rType === 'bridge') continue;
+
+      for (let side of [-1, 1]) {
+        const clusterNoise = SimpleNoise.noise(pt.x / 40.0, pt.z / 40.0);
+        
+        // Populate roadside items based on local cluster noise logic
+        const spawnGrass = (clusterNoise > 0.35) ? (Math.random() < 0.90) : (Math.random() < 0.30);
+        const spawnFlower = (clusterNoise > 0.45) ? (Math.random() < 0.70) : (Math.random() < 0.20);
+        const spawnBush = (clusterNoise > 0.30) ? (Math.random() < 0.75) : (Math.random() < 0.15);
+        const spawnPlant = (clusterNoise > 0.40) ? (Math.random() < 0.60) : (Math.random() < 0.10);
+        const spawnRock = (clusterNoise > 0.25) ? (Math.random() < 0.45) : (Math.random() < 0.08);
+
+        const spawnChecks = [spawnGrass, spawnFlower, spawnBush, spawnPlant, spawnRock];
+
+        for (let cat = 0; cat < 5; cat++) {
+          if (!spawnChecks[cat]) continue;
+
+          // Road Edge -> Grass -> Flowers -> Bushes -> Ground Plants -> Small Rocks
+          let minOffset = 0.3;
+          let maxOffset = 1.8;
+          if (cat === 0) { // Grass
+            minOffset = 0.3; maxOffset = 1.8;
+          } else if (cat === 1) { // Flower
+            minOffset = 1.8; maxOffset = 4.2;
+          } else if (cat === 2) { // Bush
+            minOffset = 4.2; maxOffset = 8.5;
+          } else if (cat === 3) { // Plant
+            minOffset = 8.5; maxOffset = 12.0;
+          } else if (cat === 4) { // Rock
+            minOffset = 12.0; maxOffset = 15.0;
+          }
+
+          const perpOffset = roadWidth / 2 + minOffset + Math.random() * (maxOffset - minOffset);
+          const tangentJitter = (Math.random() * 2.0 - 1.0) * 1.5;
+
+          const pos = new THREE.Vector3()
+            .copy(pt)
+            .addScaledVector(normal, side * perpOffset)
+            .addScaledVector(tangent, tangentJitter);
+
+          pos.y = terrainManager.getHeight(pos.x, pos.z);
+
+          // Skip if inside deep water level
+          if (pos.y < 2.0) continue;
+
+          // Skip near key game landmarks
+          if (pos.distanceToSquared(trackHelper.pagodaPos) < 1225) continue; // 35m
+          if (pos.distanceToSquared(trackHelper.waterfallPos) < 1600) continue; // 40m
+
+          // Skip near starting/finish line
+          if (u < 0.03 || u > 0.97) continue;
+
+          // Skip near village houses
+          let nearHouse = false;
+          for (let house of trackHelper.villageHouses) {
+            if (pos.distanceToSquared(house.position) < 169) { // 13m
+              nearHouse = true;
+              break;
+            }
+          }
+          if (nearHouse) continue;
+
+          const scaleVal = 0.8 + Math.random() * 0.7; // 0.8 to 1.5 Scale
+          const rotYVal = Math.random() * Math.PI * 2; // 0 to 360 deg Rotation
+
+          this.roadsideCoords[cat].push({
+            position: pos,
+            scale: scaleVal,
+            rotationY: rotYVal
+          });
+        }
+      }
+    }
+
+    // 3. Pre-create High-LOD placeholder instanced meshes (for immediate responsive loading, swapped in background)
     for (let type = 0; type < 4; type++) {
       this.buildHighDetailPlaceholder(scene, type);
     }
 
-    // 3. Pre-create Medium-LOD simplified geometry instanced meshes
+    // 4. Pre-create Medium-LOD simplified geometry instanced meshes
     for (let type = 0; type < 4; type++) {
       this.buildMediumDetailMeshes(scene, type);
     }
 
-    // 4. Pre-create Low-LOD double-sided SpeedTree crossing-quad Billboard instanced meshes
+    // 5. Pre-create Low-LOD double-sided SpeedTree crossing-quad Billboard instanced meshes
     for (let type = 0; type < 4; type++) {
       this.buildLowDetailBillboards(scene, type);
     }
 
-    // 5. Build rich Ground Details (Grass, Flowers, Bushes, Small Rocks) close to road edge
-    this.buildGroundDetails(scene, trackHelper);
+    // 6. Pre-create roadside placeholders (loaded fast before Nature pack downloading completes)
+    this.buildRoadsidePlaceholders(scene);
 
-    // 6. Initiate background asynchronous GLTF loading via GLTFLoader and Draco Loader
+    // 7. Initiate background asynchronous GLTF loading via GLTFLoader and Draco Loader
     this.preloadTreeAssets(scene);
+  }
+
+  // Verification helper for tree placements
+  private isValidTreeLocation(pos: THREE.Vector3, u: number, trackHelper: TrackGeometryHelper): boolean {
+    if (pos.y < 2.0) return false;
+    if (pos.y > 65.0) return false;
+    if (u < 0.03 || u > 0.97) return false;
+
+    if (pos.distanceToSquared(trackHelper.pagodaPos) < 1600) return false; // 40m
+    if (pos.distanceToSquared(trackHelper.waterfallPos) < 2025) return false; // 45m
+
+    for (let house of trackHelper.villageHouses) {
+      if (pos.distanceToSquared(house.position) < 324) { // 18m
+        return false;
+      }
+    }
+
+    return true;
   }
 
   /**
@@ -167,9 +385,10 @@ class ForestSystem {
   public update(playerPos: THREE.Vector3): void {
     if (!playerPos || this.trees.length === 0) return;
 
-    this.updateFrameCounter++;
-    // Throttle checks every 10 frames to optimize CPU to preserve 60 FPS target
-    if (this.updateFrameCounter % 10 !== 0) return;
+    const now = performance.now();
+    // Update dynamically exactly every 0.25 seconds to preserve high FPS
+    if (now - this.lastUpdateTime < 250) return;
+    this.lastUpdateTime = now;
 
     // Skip update if user has moved less than 3.0 meters (stationary camera optimize)
     if (playerPos.distanceToSquared(this.lastCameraPos) < 9.0) {
@@ -177,11 +396,16 @@ class ForestSystem {
     }
     this.lastCameraPos.copy(playerPos);
 
-    // Squared distance thresholds for ultra-fast arithmetic operations
-    const highDistSq = 140 * 140; // 140m High Detail (Full GLB model)
-    const medDistSq = 350 * 350;  // 350m Medium Detail (Simplified low poly)
-    const lowDistSq = 900 * 900;  // 1000m Low Detail (Billboard). Beyond 1000m completely culled/unloaded
+    // Dynamic Level of Detail squared range parameters:
+    // 0 - 120m: Full GLB models
+    // 120 - 400m: Low-poly models
+    // 400 - 1000m: Billboard trees
+    // Beyond 1000m: Unload (Scale to 0)
+    const highDistSq = 120 * 120;
+    const medDistSq = 400 * 400;
+    const lowDistSq = 1000 * 1000;
 
+    // 1. UPDATE CHOSEN LOD FOR FOREST TREES
     for (let type = 0; type < 4; type++) {
       const list = this.treesByType[type];
       const count = list.length;
@@ -191,7 +415,6 @@ class ForestSystem {
       const medMeshes = this.medInsts[type];
       const lowMesh = this.lowInsts[type];
 
-      // Track if we need to call dynamic matrix updates
       let highNeedsUpdate = false;
       let medNeedsUpdate = false;
       let lowNeedsUpdate = false;
@@ -257,7 +480,6 @@ class ForestSystem {
           // --- LOD LOW (Billboard) ---
           lowNeedsUpdate = true;
           this.dummyObj.position.copy(t.position);
-          // Scale quads slightly larger in distance to stand out more realistically
           this.dummyObj.scale.set(t.scale * 1.05, t.scale * 1.05, t.scale * 1.05);
           this.dummyObj.rotation.set(0, t.rotationY, 0);
           this.dummyObj.updateMatrix();
@@ -277,7 +499,7 @@ class ForestSystem {
           }
 
         } else {
-          // --- CULL / VISIBILITY OFF (>1000m Unloading) ---
+          // --- Beyond 1000m: CULL ---
           if (highMeshes.length > 0) {
             highMeshes.forEach(inst => inst.setMatrixAt(idx, this.zeroMatrix));
             highNeedsUpdate = true;
@@ -293,7 +515,7 @@ class ForestSystem {
         }
       }
 
-      // Propagate instanced matrix modifications to the GPU
+      // Propagate updates to GPU
       if (highNeedsUpdate) {
         highMeshes.forEach(inst => {
           inst.instanceMatrix.needsUpdate = true;
@@ -306,6 +528,52 @@ class ForestSystem {
       }
       if (lowNeedsUpdate && lowMesh) {
         lowMesh.instanceMatrix.needsUpdate = true;
+      }
+    }
+
+    // 2. UPDATE ROADSIDE VEGETATION (Draw only within 120m for seamless graphics and FPS)
+    const roadsideRangeSq = 120 * 120;
+    for (let cat = 0; cat < 5; cat++) {
+      const count = this.roadsideCoords[cat].length;
+      if (count === 0) continue;
+
+      const insts = this.roadsideInsts[cat];
+      if (insts.length === 0) continue;
+
+      let catNeedsUpdate = false;
+
+      for (let i = 0; i < count; i++) {
+        const item = this.roadsideCoords[cat][i];
+        const distSq = playerPos.distanceToSquared(item.position);
+
+        if (distSq < roadsideRangeSq) {
+          catNeedsUpdate = true;
+          this.dummyObj.position.copy(item.position);
+          this.dummyObj.scale.set(item.scale, item.scale, item.scale);
+          this.dummyObj.rotation.set(0, item.rotationY, 0);
+          this.dummyObj.updateMatrix();
+
+          insts.forEach((inst, mIdx) => {
+            const submesh = this.naturePackSubmeshes[cat][mIdx];
+            if (submesh) {
+              this.tempMatrix.multiplyMatrices(this.dummyObj.matrix, submesh.localMatrix);
+              inst.setMatrixAt(i, this.tempMatrix);
+            } else {
+              inst.setMatrixAt(i, this.dummyObj.matrix);
+            }
+          });
+        } else {
+          insts.forEach((inst) => {
+            inst.setMatrixAt(i, this.zeroMatrix);
+          });
+          catNeedsUpdate = true;
+        }
+      }
+
+      if (catNeedsUpdate) {
+        insts.forEach((inst) => {
+          inst.instanceMatrix.needsUpdate = true;
+        });
       }
     }
   }
@@ -471,121 +739,48 @@ class ForestSystem {
   }
 
   /**
-   * Injects beautiful high density organic foliage details next to spline corridor boundaries
-   * (sitting perfectly on terrain geometries)
+   * Builds roadside placeholders before the Stylized Nature Pack loads.
    */
-  private buildGroundDetails(scene: THREE.Scene, trackHelper: TrackGeometryHelper): void {
-    console.log('Generating high-density ground details next to roads...');
+  private buildRoadsidePlaceholders(scene: THREE.Scene): void {
+    const grassGeo = new THREE.ConeGeometry(0.12, 0.45, 4);
+    grassGeo.translate(0, 0.225, 0);
+    const grassMat = new THREE.MeshStandardMaterial({ color: '#27ae60', roughness: 0.9, flatShading: true });
 
-    // 1. Grass clusters setup
-    const grassGeo = new THREE.ConeGeometry(0.35, 1.1, 4);
-    grassGeo.translate(0, 0.55, 0);
-    const grassMat = new THREE.MeshStandardMaterial({ color: '#27ae60', roughness: 0.95, flatShading: true });
-    
-    const numGrass = 1400;
-    const grassInst = new THREE.InstancedMesh(grassGeo, grassMat, numGrass);
-    grassInst.castShadow = false;
-    grassInst.receiveShadow = true;
+    const flowerGeo = new THREE.DodecahedronGeometry(0.12, 0);
+    flowerGeo.translate(0, 0.4, 0);
+    const flowerMat = new THREE.MeshStandardMaterial({ color: '#e74c3c', roughness: 0.8, flatShading: true });
 
-    // 2. Bushes setup
-    const bushGeo = new THREE.IcosahedronGeometry(0.7, 1);
-    bushGeo.translate(0, 0.35, 0);
-    const bushMat = new THREE.MeshStandardMaterial({ color: '#145c26', roughness: 0.92, flatShading: true });
+    const bushGeo = new THREE.IcosahedronGeometry(0.35, 1);
+    bushGeo.translate(0, 0.25, 0);
+    const bushMat = new THREE.MeshStandardMaterial({ color: '#1b4d22', roughness: 0.9, flatShading: true });
 
-    const numBushes = 350;
-    const bushInst = new THREE.InstancedMesh(bushGeo, bushMat, numBushes);
-    bushInst.castShadow = true;
+    const plantGeo = new THREE.DodecahedronGeometry(0.28, 0);
+    plantGeo.translate(0, 0.3, 0);
+    const plantMat = new THREE.MeshStandardMaterial({ color: '#2ecc71', roughness: 0.9, flatShading: true });
 
-    // 3. Flower clusters setup
-    const flowerGeo = new THREE.DodecahedronGeometry(0.18, 0);
-    const flowerColors = ['#e74c3c', '#f1c40f', '#9b59b6', '#ecf0f1', '#f39c12'];
-    const flowerMats = flowerColors.map(c => new THREE.MeshStandardMaterial({ color: c, roughness: 0.8, flatShading: true }));
-    
-    const numFlowers = 750;
-    const flowerMeshGroups = flowerMats.map(fm => new THREE.InstancedMesh(flowerGeo, fm, 150));
+    const rockGeo = new THREE.DodecahedronGeometry(0.3, 0);
+    rockGeo.translate(0, 0.15, 0);
+    const rockMat = new THREE.MeshStandardMaterial({ color: '#7f8c8d', roughness: 0.85, flatShading: true });
 
-    // 4. Little gravel rocks setup
-    const rockGeo = new THREE.DodecahedronGeometry(0.4, 0);
-    const rockMat = new THREE.MeshStandardMaterial({ color: '#686a6e', roughness: 0.95, flatShading: true });
+    const geometries = [grassGeo, flowerGeo, bushGeo, plantGeo, rockGeo];
+    const materials = [grassMat, flowerMat, bushMat, plantMat, rockMat];
 
-    const numRocks = 300;
-    const rockInst = new THREE.InstancedMesh(rockGeo, rockMat, numRocks);
-    rockInst.castShadow = true;
+    for (let cat = 0; cat < 5; cat++) {
+      const count = this.roadsideCoords[cat].length;
+      if (count === 0) continue;
 
-    const dummyPlacer = new THREE.Object3D();
+      const inst = new THREE.InstancedMesh(geometries[cat], materials[cat], count);
+      inst.castShadow = (cat >= 2);
+      inst.receiveShadow = true;
 
-    // Linearly distribute details on random sides of the tracks
-    for (let prG = 0; prG < numGrass; prG++) {
-      const u = (prG / numGrass) % 1.0;
-      const pt = trackHelper.curve.getPointAt(u);
-      const tangent = trackHelper.curve.getTangentAt(u).normalize();
-      const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
-      const roadWidth = trackHelper.getRoadWidthAt(u);
-
-      const side = Math.random() > 0.5 ? 1 : -1;
-      // Spawn ground detail 1.5 to 18 meters from road shoulder
-      const offset = roadWidth / 2 + 1.5 + Math.random() * 16.5;
-      const pos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * offset);
-      pos.y = terrainManager.getHeight(pos.x, pos.z);
-
-      // Verify not spawning in deep water
-      if (pos.y < 2.0) continue;
-
-      dummyPlacer.position.copy(pos);
-      dummyPlacer.rotation.set(0, Math.random() * Math.PI, 0);
-      const gScale = 0.65 + Math.random() * 0.7;
-      dummyPlacer.scale.set(gScale, gScale * 1.2, gScale);
-      dummyPlacer.updateMatrix();
-
-      grassInst.setMatrixAt(prG, dummyPlacer.matrix);
-
-      // Occasional bushes
-      if (prG % 4 === 0) {
-        const bIdx = Math.floor(prG / 4) % numBushes;
-        dummyPlacer.position.copy(pos).add(new THREE.Vector3(Math.random()*1.5 - 0.75, 0.1, Math.random()*1.5 - 0.75));
-        const bScale = 0.7 + Math.random() * 0.8;
-        dummyPlacer.scale.set(bScale, bScale, bScale);
-        dummyPlacer.updateMatrix();
-        bushInst.setMatrixAt(bIdx, dummyPlacer.matrix);
+      for (let i = 0; i < count; i++) {
+        inst.setMatrixAt(i, this.zeroMatrix);
       }
+      inst.instanceMatrix.needsUpdate = true;
+      scene.add(inst);
 
-      // Occasional flowers
-      if (prG % 2 === 0) {
-        const flowerGroupIdx = Math.floor(Math.random() * flowerMeshGroups.length);
-        const groupInst = flowerMeshGroups[flowerGroupIdx];
-        const innerSlot = Math.floor(prG / 2) % 150;
-
-        dummyPlacer.position.copy(pos).add(new THREE.Vector3(Math.random() * 0.8 - 0.4, 0.25, Math.random() * 0.8 - 0.4));
-        const fScale = 0.8 + Math.random() * 0.5;
-        dummyPlacer.scale.set(fScale, fScale, fScale);
-        dummyPlacer.updateMatrix();
-        groupInst.setMatrixAt(innerSlot, dummyPlacer.matrix);
-      }
-
-      // Occasional little rocks
-      if (prG % 5 === 0) {
-        const rIdx = Math.floor(prG / 5) % numRocks;
-        dummyPlacer.position.copy(pos).add(new THREE.Vector3(Math.random() * 1.2 - 0.6, 0.05, Math.random() * 1.2 - 0.6));
-        const rSk = 0.5 + Math.random() * 0.85;
-        dummyPlacer.scale.set(rSk * 1.3, rSk, rSk);
-        dummyPlacer.updateMatrix();
-        rockInst.setMatrixAt(rIdx, dummyPlacer.matrix);
-      }
+      this.roadsideInsts[cat] = [inst];
     }
-
-    grassInst.instanceMatrix.needsUpdate = true;
-    scene.add(grassInst);
-
-    bushInst.instanceMatrix.needsUpdate = true;
-    scene.add(bushInst);
-
-    flowerMeshGroups.forEach(f => {
-      f.instanceMatrix.needsUpdate = true;
-      scene.add(f);
-    });
-
-    rockInst.instanceMatrix.needsUpdate = true;
-    scene.add(rockInst);
   }
 
   /**
@@ -597,36 +792,54 @@ class ForestSystem {
     draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
     loader.setDRACOLoader(draco);
 
-    const treeUrls = [
+    const allUrls = [
       'https://pub-a248afed72844944a7565dc9cbaacbb0.r2.dev/Trees/pine_tree_-_ps1_low_poly.glb',
       'https://pub-a248afed72844944a7565dc9cbaacbb0.r2.dev/Trees/old_tree.glb',
       'https://pub-a248afed72844944a7565dc9cbaacbb0.r2.dev/Trees/sakura.glb',
-      'https://pub-a248afed72844944a7565dc9cbaacbb0.r2.dev/Trees/tree_gn.glb'
+      'https://pub-a248afed72844944a7565dc9cbaacbb0.r2.dev/Trees/tree_gn.glb',
+      'https://pub-a248afed72844944a7565dc9cbaacbb0.r2.dev/Trees/stylized_nature_pack_vol-1__3d_tree.glb'
     ];
 
-    console.log('Initiating tree asset preloader pipeline in background...');
+    console.log('Initiating tree and vegetation asset preloader pipeline in background...');
 
-    treeUrls.forEach((url, index) => {
-      // Re-use cached GLTF scene if already loaded
+    allUrls.forEach((url, index) => {
       if (ForestSystem.treeCache.has(url)) {
-        console.log(`Reusing cached tree model for ${url}`);
+        console.log(`Reusing cached asset for ${url}`);
         const cachedScene = ForestSystem.treeCache.get(url)!;
-        const submeshes = this.extractSubmeshes(cachedScene.clone(true));
-        this.swapHighDetailPlacer(scene, index, submeshes);
+        if (index === 4) {
+          const classified = this.extractAndClassifyNaturePack(cachedScene.clone(true));
+          this.swapRoadsidePlacer(scene, classified);
+        } else {
+          const submeshes = this.extractSubmeshes(cachedScene.clone(true));
+          this.swapHighDetailPlacer(scene, index, submeshes);
+        }
         return;
       }
+
+      if (ForestSystem.activeDownloads.has(url)) {
+        console.log(`Avoid duplicate download of: ${url} (already loading)`);
+        return;
+      }
+      ForestSystem.activeDownloads.add(url);
 
       loader.load(
         url,
         (gltf) => {
-          console.log(`Successfully completed preloading tree: ${url}`);
+          console.log(`Successfully completed preloading GLB: ${url}`);
           ForestSystem.treeCache.set(url, gltf.scene);
-          const submeshes = this.extractSubmeshes(gltf.scene);
-          this.swapHighDetailPlacer(scene, index, submeshes);
+          ForestSystem.activeDownloads.delete(url);
+          if (index === 4) {
+            const classified = this.extractAndClassifyNaturePack(gltf.scene);
+            this.swapRoadsidePlacer(scene, classified);
+          } else {
+            const submeshes = this.extractSubmeshes(gltf.scene);
+            this.swapHighDetailPlacer(scene, index, submeshes);
+          }
         },
         undefined,
         (error) => {
-          console.error(`Recoverable: Could not download tree model from ${url}. Switched to fallback placeholders.`, error);
+          console.error(`Recoverable: Could not download asset model from ${url}. Switched to fallback placeholders.`, error);
+          ForestSystem.activeDownloads.delete(url);
         }
       );
     });
@@ -674,7 +887,55 @@ class ForestSystem {
     this.highInsts[type] = newHighInsts;
     this.isLoaded[type] = true;
 
-    // Force an immediate update block calculation!
+    // Force an immediate update block calculation
+    this.lastCameraPos.set(Infinity, Infinity, Infinity);
+  }
+
+  /**
+   * Swaps out roadside placeholders with loaded, classified Stylized Nature Pack entries.
+   */
+  private swapRoadsidePlacer(scene: THREE.Scene, categoriesSubmeshes: ExtractedSubmesh[][]): void {
+    console.log('Swapping roadside placeholders with real Nature Pack GLB submeshes!');
+    
+    for (let cat = 0; cat < 5; cat++) {
+      const submeshes = categoriesSubmeshes[cat];
+      if (submeshes.length === 0) continue;
+
+      const count = this.roadsideCoords[cat].length;
+      if (count === 0) continue;
+
+      // Discard placeholders
+      const placeholders = this.roadsideInsts[cat];
+      placeholders.forEach((inst) => {
+        scene.remove(inst);
+        inst.dispose();
+      });
+
+      this.naturePackSubmeshes[cat] = submeshes;
+
+      // Instantiate loaded submeshes
+      const newInsts = submeshes.map((m) => {
+        const inst = new THREE.InstancedMesh(m.geometry, m.material, count);
+        inst.castShadow = (cat >= 2);
+        inst.receiveShadow = true;
+        scene.add(inst);
+        return inst;
+      });
+
+      // Clear initially
+      for (let i = 0; i < count; i++) {
+        newInsts.forEach((inst) => inst.setMatrixAt(i, this.zeroMatrix));
+      }
+      newInsts.forEach(inst => {
+        inst.instanceMatrix.needsUpdate = true;
+      });
+
+      this.roadsideInsts[cat] = newInsts;
+    }
+
+    this.isNaturePackLoaded = true;
+    
+    // Force immediate update loop calculation
     this.lastCameraPos.set(Infinity, Infinity, Infinity);
   }
 
@@ -712,6 +973,59 @@ class ForestSystem {
     model.updateMatrixWorld(true);
 
     return result;
+  }
+
+  /**
+   * Classify submeshes in the Nature Pack GLB using string matching.
+   */
+  private extractAndClassifyNaturePack(scene: THREE.Object3D): ExtractedSubmesh[][] {
+    const categories: ExtractedSubmesh[][] = [[], [], [], [], []]; // 0: Grass, 1: Flower, 2: Bush, 3: Plant, 4: Rock
+    
+    const prevPos = scene.position.clone();
+    const prevRot = scene.rotation.clone();
+    const prevScale = scene.scale.clone();
+    scene.position.set(0, 0, 0);
+    scene.rotation.set(0, 0, 0);
+    scene.scale.set(1, 1, 1);
+    scene.updateMatrixWorld(true);
+
+    let unclassifiedCount = 0;
+
+    scene.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        const name = child.name.toLowerCase();
+        const submesh: ExtractedSubmesh = {
+          geometry: child.geometry.clone(),
+          material: child.material,
+          localMatrix: child.matrixWorld.clone()
+        };
+
+        // Classify based on node name
+        if (name.includes('grass') || name.includes('ground') || name.includes('turf') || name.includes('clover') || name.includes('lawn')) {
+          categories[0].push(submesh);
+        } else if (name.includes('flower') || name.includes('petal') || name.includes('tulip') || name.includes('blossom') || name.includes('flora') || name.includes('violet') || name.includes('poppy')) {
+          categories[1].push(submesh);
+        } else if (name.includes('bush') || name.includes('shrub') || name.includes('hedge') || name.includes('foliage')) {
+          categories[2].push(submesh);
+        } else if (name.includes('plant') || name.includes('fern') || name.includes('leaf') || name.includes('weed') || name.includes('ivy') || name.includes('dandelion')) {
+          categories[3].push(submesh);
+        } else if (name.includes('rock') || name.includes('stone') || name.includes('boulder') || name.includes('pebble') || name.includes('gravel') || name.includes('debris')) {
+          categories[4].push(submesh);
+        } else {
+          // Fallback distribution
+          const index = unclassifiedCount % 5;
+          categories[index].push(submesh);
+          unclassifiedCount++;
+        }
+      }
+    });
+
+    scene.position.copy(prevPos);
+    scene.rotation.copy(prevRot);
+    scene.scale.copy(prevScale);
+    scene.updateMatrixWorld(true);
+
+    return categories;
   }
 
   /**
@@ -861,6 +1175,13 @@ class ForestSystem {
     this.medInsts = [[], [], [], []];
     this.lowInsts = [];
     this.gltfSubmeshes = [[], [], [], []];
+
+    // Detach and clean roadside details
+    this.roadsideCoords = [[], [], [], [], []];
+    this.roadsideInsts = [[], [], [], [], []];
+    this.naturePackSubmeshes = [[], [], [], [], []];
+    this.isNaturePackLoaded = false;
+
     this.scene = null;
     this.trackHelper = null;
   }

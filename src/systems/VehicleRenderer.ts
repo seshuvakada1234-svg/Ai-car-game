@@ -26,9 +26,22 @@ export class VehicleRenderer {
     forward: false, backward: false, left: false, right: false, nitro: false
   };
 
+  private _scratchGroundVec = new THREE.Vector3();
+  private _scratchOffsetVec = new THREE.Vector3();
+
   constructor(scene: THREE.Scene, reflectionTex: THREE.Texture | null) {
     this.scene         = scene;
     this.reflectionTex = reflectionTex;
+  }
+
+  private getGroundHeight(x: number, z: number, terrainManager: any, fallbackY: number): number {
+    try {
+      this._scratchGroundVec.set(x, 0, z);
+      const rh = terrainManager.queryRoadHeight(this._scratchGroundVec);
+      return rh !== null ? rh : terrainManager.getHeight(x, z);
+    } catch {
+      return fallbackY;
+    }
   }
 
   public spawnVehicle(carState: CarState): void {
@@ -63,11 +76,11 @@ export class VehicleRenderer {
     weather: string,
     timeOfDay: string
   ): void {
+    elapsedSec = Math.min(elapsedSec, 0.05);
     // Remove meshes for cars no longer active
     const activeCarIds = new Set(cars.map(c => c.id));
     this.carGroupMap.forEach((group, id) => {
       if (!activeCarIds.has(id)) {
-        console.log(`Removing unregistered car: ${id}`);
         this.scene.remove(group);
         this.carGroupMap.delete(id);
         this.carPivotsMap.delete(id);
@@ -98,16 +111,6 @@ export class VehicleRenderer {
       carGroup.position.x = c.position.x;
       carGroup.position.z = c.position.z;
       carGroup.rotation.y = c.angle;
-
-      const getGroundHeight = (x: number, z: number): number => {
-        try {
-          const p = new THREE.Vector3(x, 0, z);
-          const rh = terrainManager.queryRoadHeight(p);
-          return rh !== null ? rh : terrainManager.getHeight(x, z);
-        } catch {
-          return c.position.y;
-        }
-      };
 
       const controls = c.id === 'player' ? playerControls : this._dummyControls;
       if (c.id !== 'player') {
@@ -179,7 +182,7 @@ export class VehicleRenderer {
           const worldX = c.position.x + localX * cosA + localZ * sinA;
           const worldZ = c.position.z - localX * sinA + localZ * cosA;
 
-          const wheelGroundY    = getGroundHeight(worldX, worldZ);
+          const wheelGroundY    = this.getGroundHeight(worldX, worldZ, terrainManager, c.position.y);
           const worldRadius     = assembly.wheelRadius * scaleY;
           const wheelCenterWorldY = wheelGroundY + worldRadius;
           const targetBodyY     = wheelCenterWorldY + BODY_OFFSET;
@@ -193,36 +196,24 @@ export class VehicleRenderer {
         if (validData.length > 0) {
           chassisWorldY = validData.reduce((sum, d) => sum + d.targetBodyY, 0) / validData.length;
         } else {
-          chassisWorldY = getGroundHeight(c.position.x, c.position.z);
+          chassisWorldY = this.getGroundHeight(c.position.x, c.position.z, terrainManager, c.position.y);
         }
 
         // Never let chassis sink below road centre
-        const roadHeightAtCenter = getGroundHeight(c.position.x, c.position.z);
+        const roadHeightAtCenter = this.getGroundHeight(c.position.x, c.position.z, terrainManager, c.position.y);
         if (chassisWorldY < roadHeightAtCenter) chassisWorldY = roadHeightAtCenter;
 
         // VehicleRenderer is the SOLE owner of carGroup.position.y
         carGroup.position.y = chassisWorldY;
 
-        console.log(
-          `[VehicleRenderer] ${c.id}` +
-          ` chassisY=${chassisWorldY.toFixed(3)}` +
-          (validData[0]
-            ? ` FL groundY=${validData[0].wheelGroundY.toFixed(3)}` +
-              ` r=${validData[0].worldRadius.toFixed(3)}` +
-              ` centerY=${validData[0].wheelCenterWorldY.toFixed(3)}`
-            : '')
-        );
-
         // ── Per-wheel: push suspensionPivot so tyre contacts ground ──────────
         // FIX: use yaw-only rotation for mount point Y.
-        // Pitch/roll affect visuals only — including them here causes phantom
-        // displacement on hilly terrain (double-counting body tilt).
         wheelData.forEach((data) => {
           if (!data) return;
-          const { assembly, wheelGroundY, worldRadius, wheelCenterWorldY } = data;
+          const { assembly, wheelCenterWorldY } = data;
 
           // Yaw-only offset of the steer-pivot from chassis centre
-          const offsetVec = assembly.initialLocalPos.clone();
+          const offsetVec = this._scratchOffsetVec.copy(assembly.initialLocalPos);
           offsetVec.x *= scaleX;
           offsetVec.y *= scaleY;
           offsetVec.z *= scaleZ;
@@ -240,47 +231,6 @@ export class VehicleRenderer {
 
           // VehicleRenderer is the SOLE writer of suspensionPivot.position
           assembly.suspensionPivot.position.set(0, localDisplacementY, 0);
-
-          // ── Detailed debug log per wheel ────────────────────────────────────
-          console.log(`[VehicleRenderer] ${c.id}`, {
-            wheelGroundY,
-            worldRadius,
-            wheelCenterWorldY,
-            mountPointWorldY,
-            localDisplacementY,
-            chassisWorldY,
-          });
-
-          // ── Debug spheres (green = wheel centre, red = mount point) ─────────
-          // Green sphere: should sit exactly at road surface + radius
-          if (!assembly.suspensionPivot.getObjectByName('debug_sphere_green')) {
-            const sphere = new THREE.Mesh(
-              new THREE.SphereGeometry(0.05, 8, 8),
-              new THREE.MeshBasicMaterial({ color: 0x39ff14, depthTest: false, transparent: true, opacity: 0.9 })
-            );
-            sphere.name = 'debug_sphere_green';
-            assembly.suspensionPivot.add(sphere);
-          }
-          // Red sphere: mount point world Y (steer pivot origin in world space)
-          if (!assembly.steerPivot.getObjectByName('debug_sphere_red')) {
-            const sphere = new THREE.Mesh(
-              new THREE.SphereGeometry(0.05, 8, 8),
-              new THREE.MeshBasicMaterial({ color: 0xff2200, depthTest: false, transparent: true, opacity: 0.9 })
-            );
-            sphere.name = 'debug_sphere_red';
-            assembly.steerPivot.add(sphere);
-          }
-          if (!assembly.suspensionPivot.getObjectByName('debug_line')) {
-            const line = new THREE.Line(
-              new THREE.BufferGeometry().setFromPoints([
-                new THREE.Vector3(0, 0, 0),
-                new THREE.Vector3(0, -assembly.wheelRadius, 0)
-              ]),
-              new THREE.LineBasicMaterial({ color: 0xff0055, depthTest: false, transparent: true, opacity: 0.8 })
-            );
-            line.name = 'debug_line';
-            assembly.suspensionPivot.add(line);
-          }
         });
 
         // Brake light emissions
@@ -298,20 +248,14 @@ export class VehicleRenderer {
         const cosA = Math.cos(c.angle);
         const sinA = Math.sin(c.angle);
 
-        const getFbGroundH = (lx: number, lz: number) => {
-          const wx = c.position.x + lx * cosA + lz * sinA;
-          const wz = c.position.z - lx * sinA + lz * cosA;
-          return getGroundHeight(wx, wz);
-        };
-
-        const flG  = getFbGroundH( 0.95,  1.15);
-        const frG  = getFbGroundH(-0.95,  1.15);
-        const rlG  = getFbGroundH( 1.0,  -1.2);
-        const rrG  = getFbGroundH(-1.0,  -1.2);
+        const flG  = this.getGroundHeight(c.position.x + 0.95 * cosA + 1.15 * sinA, c.position.z - 0.95 * sinA + 1.15 * cosA, terrainManager, c.position.y);
+        const frG  = this.getGroundHeight(c.position.x - 0.95 * cosA + 1.15 * sinA, c.position.z + 0.95 * sinA + 1.15 * cosA, terrainManager, c.position.y);
+        const rlG  = this.getGroundHeight(c.position.x + 1.0 * cosA - 1.2 * sinA, c.position.z - 1.0 * sinA - 1.2 * cosA, terrainManager, c.position.y);
+        const rrG  = this.getGroundHeight(c.position.x - 1.0 * cosA - 1.2 * sinA, c.position.z + 1.0 * sinA - 1.2 * cosA, terrainManager, c.position.y);
         const avgG = (flG + frG + rlG + rrG) / 4;
 
         let targetY = avgG + 0.15;
-        const centerG = getGroundHeight(c.position.x, c.position.z);
+        const centerG = this.getGroundHeight(c.position.x, c.position.z, terrainManager, c.position.y);
         if (targetY - 0.15 < centerG + 0.05) targetY = centerG + 0.05 + 0.15;
 
         // VehicleRenderer is the SOLE writer of carGroup.position.y

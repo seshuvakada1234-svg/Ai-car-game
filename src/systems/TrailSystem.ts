@@ -50,16 +50,13 @@ export class RibbonTrail {
     });
     
     this.mesh = new THREE.Mesh(this.geometry, mat);
-    scene.add(this.mesh);
+    this.mesh.visible = false; // Disable all trail rendering and make them invisible
+    // scene.add(this.mesh); // Do not add to the scene to guarantee they are completely removed from the game
   }
 
   public addPoint(pos: THREE.Vector3, colorHex: string): void {
-    // Avoid expanding array continuously; push new clone and shift
-    this.positions.push(pos.clone());
-    if (this.positions.length > this.maxPoints) {
-      this.positions.shift();
-    }
-    this.updateGeometry(colorHex);
+    // Return early to disable expanding and computing trail geometry
+    return;
   }
 
   public clear(): void {

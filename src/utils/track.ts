@@ -267,6 +267,8 @@ export class TrackGeometryHelper {
   checkpoints: Checkpoint[] = [];
   length: number;
   public carLastIndexMap = new Map<string, number>();
+  private trackInfoCache = new Map<string, { pos: THREE.Vector3; result: any }>();
+  private globalLastQuery: { pos: THREE.Vector3; result: any } | null = null;
   
   // High fidelity scenery distribution structures
   trees: { position: THREE.Vector3; scale: number; type: number }[] = [];
@@ -383,12 +385,39 @@ export class TrackGeometryHelper {
           distanceToTrack: 0,
         };
       }
+
+      // Check cache
+      if (carId) {
+        const cached = this.trackInfoCache.get(carId);
+        if (cached && pos.distanceToSquared(cached.pos) < 0.01) {
+          return {
+            nearestPoint: cached.result.nearestPoint.clone(),
+            progress: cached.result.progress,
+            tangent: cached.result.tangent.clone(),
+            normal: cached.result.normal.clone(),
+            width: cached.result.width,
+            sideOffset: cached.result.sideOffset,
+            distanceToTrack: cached.result.distanceToTrack,
+          };
+        }
+      } else if (this.globalLastQuery && pos.distanceToSquared(this.globalLastQuery.pos) < 0.01) {
+        return {
+          nearestPoint: this.globalLastQuery.result.nearestPoint.clone(),
+          progress: this.globalLastQuery.result.progress,
+          tangent: this.globalLastQuery.result.tangent.clone(),
+          normal: this.globalLastQuery.result.normal.clone(),
+          width: this.globalLastQuery.result.width,
+          sideOffset: this.globalLastQuery.result.sideOffset,
+          distanceToTrack: this.globalLastQuery.result.distanceToTrack,
+        };
+      }
+
       let minDistance = Infinity;
       let nearestProgress = 0;
       let nearestPoint = new THREE.Vector3();
       
       const pointsLength = this.cachedPoints ? this.cachedPoints.length : 0;
-      const samples = Math.min(2000, pointsLength);
+      const samples = Math.min(500, pointsLength);
 
       let foundIndex = -1;
       let lastCachedIdx = carId ? this.carLastIndexMap.get(carId) : undefined;
@@ -445,7 +474,7 @@ export class TrackGeometryHelper {
       const searchStep = 1 / (Math.max(samples, 1) * 5);
       const tempPt = SCRATCH_POS_A;
       if (this.curve && typeof this.curve.getPointAt === 'function') {
-        for (let step = -4; step <= 4; step++) {
+        for (let step = -2; step <= 2; step++) {
           let u = (nearestProgress + step * searchStep + 1.0) % 1.0;
           if (isNaN(u) || u === undefined || u === null) u = 0.0;
           try {
@@ -481,6 +510,25 @@ export class TrackGeometryHelper {
       const toCar = SCRATCH_POS_B.subVectors(pos, nearestPoint);
       const sideOffset = toCar.dot(normal);
 
+      const resultValue = {
+        nearestPoint: nearestPoint.clone(),
+        progress: preciseProgress,
+        tangent: tangent.clone(),
+        normal: normal.clone(),
+        width,
+        sideOffset,
+        distanceToTrack: Math.sqrt(minDistance === Infinity ? 0 : minDistance),
+      };
+
+      if (carId) {
+        if (this.trackInfoCache.size > 200) {
+          this.trackInfoCache.clear();
+        }
+        this.trackInfoCache.set(carId, { pos: pos.clone(), result: resultValue });
+      } else {
+        this.globalLastQuery = { pos: pos.clone(), result: resultValue };
+      }
+
       return {
         nearestPoint,
         progress: preciseProgress,
@@ -488,7 +536,7 @@ export class TrackGeometryHelper {
         normal,
         width,
         sideOffset,
-        distanceToTrack: Math.sqrt(minDistance === Infinity ? 0 : minDistance),
+        distanceToTrack: resultValue.distanceToTrack,
       };
     } catch (err) {
       console.warn("Exception caught in getNearestTrackInfo, returning safe fallback values:", err);
@@ -533,8 +581,8 @@ export class TrackGeometryHelper {
     this.pagodaPos = new THREE.Vector3(-450, getTerrainHeight(-450, 120, this), 120); // Central Town Church
     this.waterfallPos = new THREE.Vector3(-150, getTerrainHeight(-150, 2400, this) + 2, 2400); // Old Brookside Watermill
 
-    // 2. Sample 2000 detailed points along the course to achieve heavy forest density (10,000+ trees)
-    const steps = 2000;
+    // 2. Sample 600 detailed points along the course to achieve heavy forest density (10,000+ trees)
+    const steps = 600;
     for (let j = 0; j < steps; j++) {
       const u = j / steps;
       const zoneIdx = Math.floor(u * 10); // 10 distinct zones
@@ -549,8 +597,8 @@ export class TrackGeometryHelper {
 
       // Heavy open-world tree generation (forest density covers all background hills)
       if (!isInsideRestricted) {
-        // Spawn 4 to 8 trees in random placement clusters at every step
-        const clusterCount = 4 + Math.floor(random() * 5);
+        // Spawn 2 to 3 trees in random placement clusters at every step
+        const clusterCount = 2 + Math.floor(random() * 2);
         for (let tc = 0; tc < clusterCount; tc++) {
           const side = random() > 0.5 ? 1 : -1;
           // Spawn trees strictly at least 15 meters from the road edge

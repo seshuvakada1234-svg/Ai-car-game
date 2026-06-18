@@ -444,7 +444,7 @@ export const HUD: React.FC<HUDProps> = ({
         gear: nextGear,
       }));
     }
-  }, [gasPressed, brakePressed, player.speed, gear, setControls]);
+  }, [gasPressed, brakePressed, player.speed, gear, setControls, controls]);
 
   const triggerNotification = (msg: string) => {
     setNotif(msg);
