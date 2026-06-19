@@ -69,6 +69,44 @@ export const TRACK_CONTROL_POINTS: TrackNode[] = [
   { position: { x: -50, y: 5, z: -720 }, width: 24, type: 'straight' },    // 38: Pre-finish gate stretch
 ];
 
+// Coastal Sunset Circuit (Map 2) - 2.5 KM (2500 meters) loop track
+export const COASTAL_SUNSET_CONTROL_POINTS: TrackNode[] = [
+  // Zone 0: Beach Start Area (starts around x: 0, y: 1.5, z: 0)
+  { position: { x: 0, y: 1.5, z: 0 }, width: 24, type: 'straight' },    // 0: Start Grid / Finish Line
+  { position: { x: 100, y: 1.5, z: 120 }, width: 24, type: 'straight' }, // 1: Pit area flank
+  { position: { x: 220, y: 1.5, z: 220 }, width: 24, type: 'straight' }, // 2: Coastal Highway entry
+
+  // Zone 1: Coastal Highway (long straight alongside the ocean)
+  { position: { x: 380, y: 2.0, z: 340 }, width: 26, type: 'straight' }, // 3: Ocean road entrance
+  { position: { x: 550, y: 2.0, z: 460 }, width: 26, type: 'straight' }, // 4: Wave spray barriers side
+  { position: { x: 740, y: 2.5, z: 540 }, width: 26, type: 'straight' }, // 5: Fast ocean sweep stretch
+  { position: { x: 920, y: 3.0, z: 580 }, width: 26, type: 'straight' }, // 6: Cliff tunnel mouth approach
+
+  // Zone 2: Neon Tunnel Section (neon blue lights inside a rocky tunnel passageway)
+  { position: { x: 1080, y: 4.5, z: 520 }, width: 22, type: 'tunnel' },  // 7: Cave portal entrance
+  { position: { x: 1180, y: 6.0, z: 400 }, width: 22, type: 'tunnel' },  // 8: Under-mountain blue lit run
+  { position: { x: 1220, y: 7.5, z: 250 }, width: 22, type: 'tunnel' },  // 9: Curved cavern bend
+  { position: { x: 1180, y: 8.5, z: 100 }, width: 22, type: 'tunnel' },  // 10: Cave portal exit
+
+  // Zone 3: Mountain Hairpin Curves (steep climbs and sharp turns along low-poly cliffs)
+  { position: { x: 1060, y: 15.0, z: -20 }, width: 18, type: 'hairpin' }, // 11: Switchback 1 ascent
+  { position: { x: 950, y: 24.5, z: -100 }, width: 18, type: 'hairpin' }, // 12: Peak hairpin bend 1
+  { position: { x: 800, y: 32.0, z: -80 }, width: 18, type: 'hairpin' },  // 13: Cliff face ridge straight
+  { position: { x: 680, y: 35.5, z: -150 }, width: 18, type: 'hairpin' }, // 14: Peak hairpin bend 2
+  { position: { x: 520, y: 24.0, z: -220 }, width: 18, type: 'hairpin' }, // 15: Rapid descent, mountain bridge
+
+  // Zone 4: Harbor Area (containers, small cranes, factory warehouses)
+  { position: { x: 380, y: 7.0, z: -280 }, width: 24, type: 'normal' },  // 16: Docks industrial entry
+  { position: { x: 230, y: 3.0, z: -320 }, width: 24, type: 'normal' },  // 17: Container stack alleyways
+  { position: { x: 100, y: 2.2, z: -300 }, width: 24, type: 'normal' },  // 18: Grand crane bay bypass
+  { position: { x: -20, y: 1.5, z: -250 }, width: 24, type: 'normal' },  // 19: Leaving harbor gates
+
+  // Zone 5: Spectator Grandstand & Finish Straight (fireworks, billboards, finish line banner)
+  { position: { x: -100, y: 1.5, z: -180 }, width: 24, type: 'straight' }, // 20: Home stretch approach
+  { position: { x: -140, y: 1.5, z: -100 }, width: 24, type: 'straight' }, // 21: Grandstand curve entry
+  { position: { x: -100, y: 1.5, z: -40 }, width: 24, type: 'straight' },  // 22: High speed final straightaway
+];
+
 // Deterministic 2D Perlin noise implementation for multi-octave terrain generation
 const grad2D = [
   [1, 1], [-1, 1], [1, -1], [-1, -1],
@@ -151,6 +189,74 @@ const PEAKS = [
 
 // High fidelity fully-integrated terrain height function with smooth carving around road splines
 export function getTerrainHeight(x: number, z: number, trackHelper?: any): number {
+  if (trackHelper && trackHelper.mapType === 'map2') {
+    // 1. Base beach height with soft sand dunes
+    const rawNoise = noiseFBm(x, z, 3);
+    let baseHeight = rawNoise * 6.5 + 1.2; // soft coastal dunes
+
+    // 2. Coastal Ocean, Tunnel Mountain, and Cliff carving
+    if (typeof trackHelper.getNearestTrackInfo === 'function') {
+      const info = trackHelper.getNearestTrackInfo(new THREE.Vector3(x, 0, z));
+      if (info && info.nearestPoint) {
+        const roadWidth = typeof trackHelper.getRoadWidthAt === 'function' ? trackHelper.getRoadWidthAt(info.progress) : 24;
+        const halfWidth = roadWidth / 2;
+
+        // Check if we are outside the road corridor
+        if (info.distanceToTrack > halfWidth + 8.0) {
+          // If we are on the Coastal Highway (Zone 1, progress 0.10 - 0.32) and sideOffset is negative (outer right overlook of ocean)
+          if (info.progress > 0.10 && info.progress < 0.32 && info.sideOffset < 0) {
+            const oceanDist = Math.max(0, -info.sideOffset - (halfWidth + 8.0));
+            const tOcean = Math.min(1.0, oceanDist / 50.0);
+            baseHeight = THREE.MathUtils.lerp(baseHeight, -12.0, tOcean * tOcean);
+          }
+        }
+
+        // 3. Mountain ridges for the Tunnel Section (progress 0.26 to 0.46)
+        if (info.progress > 0.26 && info.progress < 0.46) {
+          const tunnelCenterProgress = 0.36;
+          const distFromTunnelCenter = Math.abs(info.progress - tunnelCenterProgress) / 0.10; // Normalized 0 to 1
+          if (distFromTunnelCenter < 1.0) {
+            const mountainFalloff = 1.0 - distFromTunnelCenter; 
+            const mountainY = 24.0 * Math.sin(mountainFalloff * Math.PI / 2) + 2.0;
+
+            // Raise massive mountain above, but leave road bed alone
+            if (info.distanceToTrack > halfWidth + 2.0) {
+              const cliffDist = info.distanceToTrack - (halfWidth + 2.0);
+              const cliffT = Math.min(1.0, cliffDist / 22.0);
+              baseHeight = THREE.MathUtils.lerp(info.nearestPoint.y - 0.45, mountainY, cliffT);
+            } else {
+              baseHeight = info.nearestPoint.y - 0.45;
+            }
+          }
+        }
+
+        // 4. Cliffs for Mountain Curves (progress 0.46 to 0.65)
+        if (info.progress >= 0.46 && info.progress <= 0.65) {
+          if (info.distanceToTrack > halfWidth + 1.5) {
+            const sideSign = info.sideOffset > 0 ? 1 : -1;
+            const cliffFactor = Math.min(1.0, (info.distanceToTrack - halfWidth - 1.5) / 25.0);
+            if (sideSign > 0) {
+              // steep cliff mountain peak rising up on one side
+              baseHeight = THREE.MathUtils.lerp(info.nearestPoint.y - 0.45, info.nearestPoint.y + 22.0, cliffFactor);
+            } else {
+              // steep cliff dropping down to ocean bed on the opposite side
+              baseHeight = THREE.MathUtils.lerp(info.nearestPoint.y - 0.45, -12.0, cliffFactor);
+            }
+          } else {
+            baseHeight = info.nearestPoint.y - 0.45;
+          }
+        }
+
+        // 5. Hard Road/Slab carving for other zones to guarantee driving surface is flat
+        if (info.distanceToTrack < halfWidth + 6.0) {
+          baseHeight = info.nearestPoint.y - 0.45;
+        }
+      }
+    }
+
+    return Math.max(-15.0, baseHeight);
+  }
+
   const distFromCenter = Math.sqrt(x * x + z * z);
   
   // 1. Continuous Multi-Octave Perlin noise base (6 octaves for granular valleys and hills)
@@ -262,6 +368,7 @@ const SCRATCH_POS_A = new THREE.Vector3();
 const SCRATCH_POS_B = new THREE.Vector3();
 
 export class TrackGeometryHelper {
+  public mapType: 'map1' | 'map2';
   curve: THREE.CatmullRomCurve3;
   cachedPoints: THREE.Vector3[];
   checkpoints: Checkpoint[] = [];
@@ -288,10 +395,19 @@ export class TrackGeometryHelper {
   waterfallPos: THREE.Vector3 = new THREE.Vector3(-150, 20, 2400); // Waterfall Valley (will be updated on load)
   finishGatePos: THREE.Vector3 = new THREE.Vector3(0, 0, 0); // Start/Finish line gate coordinates
 
-  constructor() {
+  constructor(selectedMap: 'map1' | 'map2' = 'map1') {
+    this.mapType = selectedMap;
+
     // 1. Instantiating closed 3D CatmullRom spline loop
-    const threePoints = TRACK_CONTROL_POINTS.map(
-      node => new THREE.Vector3(node.position.x, node.position.y, node.position.z)
+    const controlPoints = selectedMap === 'map2' ? COASTAL_SUNSET_CONTROL_POINTS : TRACK_CONTROL_POINTS;
+    const scaleFactor = selectedMap === 'map2' ? 0.7024 : 1.0;
+
+    const threePoints = controlPoints.map(
+      node => new THREE.Vector3(
+        node.position.x * scaleFactor, 
+        node.position.y * (selectedMap === 'map2' ? 0.8 : 1.0), 
+        node.position.z * scaleFactor
+      )
     );
     this.curve = new THREE.CatmullRomCurve3(threePoints, true, 'centripetal');
     
@@ -326,7 +442,7 @@ export class TrackGeometryHelper {
     const pagodaPt = this.curve.getPointAt(0.74); // dragon temple zone center
     this.pagodaPos.set(-450, getTerrainHeight(-450, 120, this), 120);
 
-    // 2. High fidelity analytical checkpoints (30 checkpoints across 10 KM course)
+    // 2. High fidelity analytical checkpoints (30 checkpoints across course)
     const numCheckpoints = 30;
     for (let i = 0; i < numCheckpoints; i++) {
       const u = i / numCheckpoints;
@@ -351,14 +467,15 @@ export class TrackGeometryHelper {
     u = u % 1.0;
     if (u < 0) u += 1.0;
 
-    const size = TRACK_CONTROL_POINTS.length;
+    const controlPoints = this.mapType === 'map2' ? COASTAL_SUNSET_CONTROL_POINTS : TRACK_CONTROL_POINTS;
+    const size = controlPoints.length;
     const indexFloat = u * size;
     const currIdx = Math.floor(indexFloat) % size;
     const nextIdx = (currIdx + 1) % size;
     const alpha = indexFloat - Math.floor(indexFloat);
 
-    const currWidth = TRACK_CONTROL_POINTS[currIdx].width;
-    const nextWidth = TRACK_CONTROL_POINTS[nextIdx].width;
+    const currWidth = controlPoints[currIdx].width;
+    const nextWidth = controlPoints[nextIdx].width;
     return currWidth + (nextWidth - currWidth) * alpha;
   }
 
@@ -366,9 +483,10 @@ export class TrackGeometryHelper {
   getRoadTypeAt(u: number): string {
     if (u === undefined || u === null || isNaN(u)) u = 0;
     u = (u % 1.0 + 1.0) % 1.0;
-    const size = TRACK_CONTROL_POINTS.length;
+    const controlPoints = this.mapType === 'map2' ? COASTAL_SUNSET_CONTROL_POINTS : TRACK_CONTROL_POINTS;
+    const size = controlPoints.length;
     const index = Math.floor(u * size) % size;
-    return TRACK_CONTROL_POINTS[index].type || 'normal';
+    return controlPoints[index].type || 'normal';
   }
 
   // Fast math projecting player positions directly upon closest spline segment
@@ -554,6 +672,10 @@ export class TrackGeometryHelper {
 
   // Procedural distribution of scenery matching 10 distinct thematic European zones
   private generateSceneryDistributions() {
+    if (this.mapType === 'map2') {
+      this.generateCoastalSunsetScenery();
+      return;
+    }
     let seed = 98765;
     const random = () => {
       const x = Math.sin(seed++) * 10000;
@@ -803,6 +925,272 @@ export class TrackGeometryHelper {
           break;
       }
     }
+  }
+
+  // Procedural distribution of scenery for Coastal Sunset Circuit (Map 2)
+  private generateCoastalSunsetScenery() {
+    let seed = 12345;
+    const random = () => {
+      const x = Math.sin(seed++) * 10000;
+      return x - Math.floor(x);
+    };
+
+    // 1. Add low coastal hills/mountains configs (only 2 basic ones for backing scenery)
+    this.mountains.push({
+      position: new THREE.Vector3(1400, -5, 600),
+      radius: 800,
+      height: 35
+    });
+    this.mountains.push({
+      position: new THREE.Vector3(900, -5, -800),
+      radius: 900,
+      height: 45
+    });
+
+    // 2. Loop through 350 spacing points to place assets along the Coastal Sunset track
+    const steps = 350;
+    for (let j = 0; j < steps; j++) {
+      const u = j / steps;
+      const pt = this.curve.getPointAt(u);
+      const tangent = this.curve.getTangentAt(u).normalize();
+      const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
+      const roadWidth = this.getRoadWidthAt(u);
+      const rType = this.getRoadTypeAt(u);
+      const headingAngle = Math.atan2(tangent.x, tangent.z);
+
+      // --- SECTION 1: Beach Start Area (u: 0.0 to 0.12) ---
+      if (u >= 0.0 && u < 0.12) {
+        // Grandstand and Pits
+        if (j === 5 || j === 15) {
+          const side = -1; // place on outer left side
+          const standY = getTerrainHeight(pt.x + normal.x * side * (roadWidth / 2 + 15), pt.z + normal.z * side * (roadWidth / 2 + 15), this);
+          this.grandstands.push({
+            position: new THREE.Vector3().copy(pt).addScaledVector(normal, side * (roadWidth / 2 + 14.5)),
+            scale: new THREE.Vector3(1.2, 1.2, 1.2),
+            rotation: headingAngle
+          });
+        }
+        
+        // Spawn Palm Trees (Birch/palm representational trunk)
+        if (j % 12 === 0) {
+          const side = random() > 0.5 ? 1 : -1;
+          const treePos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * (roadWidth / 2 + 10.0 + random() * 12.0));
+          treePos.y = getTerrainHeight(treePos.x, treePos.z, this);
+          this.trees.push({
+            position: treePos,
+            scale: 1.0 + random() * 0.8,
+            type: 1 // Birch / Palm trunk
+          });
+        }
+
+        // Billboards
+        if (j % 20 === 0) {
+          const bPos = new THREE.Vector3().copy(pt).addScaledVector(normal, 1 * (roadWidth / 2 + 6.0));
+          this.billboards.push({
+            position: bPos,
+            rotation: headingAngle + Math.PI / 2,
+            text: 'SUNSET BEACH'
+          });
+        }
+      }
+
+      // --- SECTION 2: Coastal Highway (u: 0.12 to 0.28) ---
+      else if (u >= 0.12 && u < 0.28) {
+        // Guard rails (rocks/barriers) on the outer right (ocean overlook side)
+        if (j % 4 === 0) {
+          const side = -1; // right side overlooking ocean
+          const rfPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * (roadWidth / 2 + 1.2));
+          rfPos.y = pt.y + 0.55;
+          // Spawn rocks as guard barriers
+          this.rocks.push({
+            position: rfPos,
+            scale: new THREE.Vector3(1.3, 0.6, 1.3),
+            rotation: new THREE.Euler(0, random() * Math.PI, 0)
+          });
+        }
+
+        // Low-poly palms/shrub on left side
+        if (j % 10 === 0) {
+          const side = 1;
+          const treePos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * (roadWidth / 2 + 11.0 + random() * 15.0));
+          treePos.y = getTerrainHeight(treePos.x, treePos.z, this);
+          this.trees.push({
+            position: treePos,
+            scale: 0.8 + random() * 0.8,
+            type: 3 // shrub
+          });
+        }
+
+        // Roadside Rocks on left
+        if (j % 16 === 0) {
+          const rPos = new THREE.Vector3().copy(pt).addScaledVector(normal, 1 * (roadWidth / 2 + 6.0));
+          rPos.y = getTerrainHeight(rPos.x, rPos.z, this) + 0.4;
+          this.rocks.push({
+            position: rPos,
+            scale: new THREE.Vector3(3.0 + random() * 4.0, 3.0 + random() * 4.0, 3.0 + random() * 4.0),
+            rotation: new THREE.Euler(random(), random(), random())
+          });
+        }
+      }
+
+      // --- SECTION 3: Neon Tunnel Section (u: 0.28 to 0.44) ---
+      else if (u >= 0.28 && u < 0.44) {
+        // Neon blue lights inside tunnel
+        // Limit is crucial: maximum 10 lights on map! Let's place exactly 6 neon lights inside the tunnel zone.
+        if (j % 18 === 0 && this.lights.length < 6) {
+          const lightPos = new THREE.Vector3().copy(pt);
+          lightPos.y += 4.5; // overhead center hanging light
+          this.lights.push({
+            position: lightPos,
+            color: '#00f6ff', // neon cyan blue
+            intensity: 75
+          });
+        }
+        
+        // Spawn mountain backing rocks above the tunnel
+        if (j % 15 === 0) {
+          const side = random() > 0.5 ? 1.5 : -1.5;
+          const rPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * (roadWidth / 2 + 14.0));
+          rPos.y = pt.y + 12.0;
+          this.rocks.push({
+            position: rPos,
+            scale: new THREE.Vector3(12.0, 12.0, 12.0),
+            rotation: new THREE.Euler(random() * 0.5, random() * 3.14, 0)
+          });
+        }
+      }
+
+      // --- SECTION 4: Mountain Curves (u: 0.44 to 0.64) ---
+      else if (u >= 0.44 && u < 0.64) {
+        // High density rocks along cliff walls (left side rises up, right side drops down)
+        if (j % 5 === 0) {
+          const rPos = new THREE.Vector3().copy(pt).addScaledVector(normal, 1 * (roadWidth / 2 + 4.2));
+          rPos.y = getTerrainHeight(rPos.x, rPos.z, this) + 0.5;
+          this.rocks.push({
+            position: rPos,
+            scale: new THREE.Vector3(5.0 + random() * 6.0, 8.0 + random() * 12.0, 5.0 + random() * 6.0),
+            rotation: new THREE.Euler(0, random() * Math.PI, 0)
+          });
+        }
+
+        // Pine trees on mountain ledges
+        if (j % 12 === 0) {
+          const side = random() > 0.5 ? 1 : -1;
+          const treePos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * (roadWidth / 2 + 8.5 + random() * 10.0));
+          treePos.y = getTerrainHeight(treePos.x, treePos.z, this);
+          if (treePos.y > pt.y - 2.0 && treePos.y < pt.y + 20.0) {
+            this.trees.push({
+              position: treePos,
+              scale: 0.9 + random() * 1.3,
+              type: 0 // Spruce Pine
+            });
+          }
+        }
+      }
+
+      // --- SECTION 5: Harbor Area (u: 0.64 to 0.88) ---
+      else if (u >= 0.64 && u < 0.88) {
+        // Warehouses, factories & shipping containers
+        if (j % 15 === 0 && this.villageHouses.length < 30) {
+          const side = random() > 0.5 ? 1 : -1;
+          const housePos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * (roadWidth / 2 + 12.0 + random() * 8.0));
+          housePos.y = getTerrainHeight(housePos.x, housePos.z, this);
+          this.villageHouses.push({
+            position: housePos,
+            scale: 1.5 + random() * 0.8,
+            rotation: headingAngle + Math.PI / 2
+          });
+        }
+
+        // Container stacks: shipping structures
+        if (j % 8 === 0) {
+          const side = random() > 0.5 ? 1 : -1;
+          const boxPos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * (roadWidth / 2 + 5.5));
+          boxPos.y = pt.y + 0.5;
+          this.villageHouses.push({
+            position: boxPos,
+            scale: 0.7,
+            rotation: headingAngle
+          });
+        }
+        
+        // Small trees/palm on the sidewalk
+        if (j % 14 === 0) {
+          const treePos = new THREE.Vector3().copy(pt).addScaledVector(normal, -1 * (roadWidth / 2 + 8.0));
+          treePos.y = getTerrainHeight(treePos.x, treePos.z, this);
+          this.trees.push({
+            position: treePos,
+            scale: 0.8 + random() * 0.5,
+            type: 1 // palm
+          });
+        }
+      }
+
+      // --- SECTION 6: Finish Straight (u: 0.88 to 1.0) ---
+      else {
+        // Grandstand, finish banner, and street lights
+        if (j === steps - 12) {
+          // Overhead finish banner gate at starting line
+          this.banners.push({
+            position: new THREE.Vector3().copy(pt),
+            rotation: headingAngle,
+            text: 'FINISH'
+          });
+          
+          // Place 2 finish lights near the starting lane banner!
+          const lPos1 = new THREE.Vector3().copy(pt).addScaledVector(normal, roadWidth / 2 + 2);
+          lPos1.y += 6.0;
+          this.lights.push({
+            position: lPos1,
+            color: '#ffe11a', // golden orange sunset light
+            intensity: 45
+          });
+
+          const lPos2 = new THREE.Vector3().copy(pt).addScaledVector(normal, -roadWidth / 2 - 2);
+          lPos2.y += 6.0;
+          this.lights.push({
+            position: lPos2,
+            color: '#ffe11a',
+            intensity: 45
+          });
+        }
+
+        // Billboards & Grandstand spectating zone
+        if (j % 16 === 0) {
+          const standPos = new THREE.Vector3().copy(pt).addScaledVector(normal, 1 * (roadWidth / 2 + 12.0));
+          this.grandstands.push({
+            position: standPos,
+            scale: new THREE.Vector3(1.1, 1.1, 1.1),
+            rotation: headingAngle
+          });
+        }
+
+        if (j % 10 === 0) {
+          const side = random() > 0.5 ? 1 : -1;
+          const treePos = new THREE.Vector3().copy(pt).addScaledVector(normal, side * (roadWidth / 2 + 10.0 + random() * 8.0));
+          treePos.y = getTerrainHeight(treePos.x, treePos.z, this);
+          this.trees.push({
+            position: treePos,
+            scale: 1.0 + random() * 0.6,
+            type: 1 // palm
+          });
+        }
+      }
+    }
+
+    // Safety checks: double-check constraints
+    if (this.trees.length > 300) {
+      this.trees = this.trees.slice(0, 300);
+    }
+    const housesLimit = 40 - this.grandstands.length;
+    if (this.villageHouses.length > housesLimit) {
+      this.villageHouses = this.villageHouses.slice(0, housesLimit);
+    }
+    if (this.lights.length > 10) {
+      this.lights = this.lights.slice(0, 10);
+    }
+
+    console.log(`Coastal Sunset Scenery generated: ${this.trees.length} trees, ${this.villageHouses.length} warehouses, ${this.grandstands.length} grandstands, ${this.lights.length} lights.`);
   }
 }
 

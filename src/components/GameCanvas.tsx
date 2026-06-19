@@ -6,6 +6,7 @@ import { TrafficAIService } from '../ai/TrafficAI';
 import { TrackGeometryHelper } from '../utils/track';
 import { preloadGLTFAssets } from '../world/procedural';
 import { DragonTrackWorld } from '../world/DragonTrackWorld';
+import { CoastalSunsetTrackWorld } from '../world/CoastalSunsetTrackWorld';
 import { lodManager } from '../world/lodManager';
 import { terrainManager } from '../world/TerrainManager';
 import { forestSystem } from '../world/forest';
@@ -122,7 +123,10 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     const reflectionTex = createReflectionMap();
 
     // --- 3. DYNAMIC WORLD GEOMETRIES ---
-    const dragonWorld = new DragonTrackWorld(scene, trackHelper);
+    const isMap2 = trackHelper.mapType === 'map2';
+    const dragonWorld = isMap2 
+      ? new CoastalSunsetTrackWorld(scene, trackHelper) 
+      : new DragonTrackWorld(scene, trackHelper);
 
     // Cache Watermill Wheels from the scene once at spawn to completely eliminate scene.traverse()
     const cachedWatermillWheels: THREE.Object3D[] = [];

@@ -77,6 +77,7 @@ export interface GameSettings {
   difficulty: Difficulty;
   carColor: string;
   selectedCar: 'lamborghini' | 'ferrari' | 'bugatti' | 'porsche';
+  selectedMap?: 'map1' | 'map2';
 }
 
 export type GamePhase = 'menu' | 'countdown' | 'racing' | 'completed';

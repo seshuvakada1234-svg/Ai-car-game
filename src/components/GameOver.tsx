@@ -13,6 +13,7 @@ interface GameOverProps {
   elapsedTime: number;
   onRestart: () => void;
   onHome: () => void;
+  onNextRace?: () => void;
 }
 
 export const GameOver: React.FC<GameOverProps> = ({
@@ -21,6 +22,7 @@ export const GameOver: React.FC<GameOverProps> = ({
   elapsedTime,
   onRestart,
   onHome,
+  onNextRace,
 }) => {
   // Amalgamate leaderboard positions
   const fullLeaderboard = [player, ...opponents].sort((a, b) => a.racePosition - b.racePosition);
@@ -133,22 +135,34 @@ export const GameOver: React.FC<GameOverProps> = ({
         </div>
 
         {/* Buttons Action items */}
-        <div className="flex space-x-3 pt-2">
-          <button
-            onClick={onHome}
-            className="flex-1 bg-slate-950 hover:bg-slate-850 text-slate-300 font-bold uppercase text-xs tracking-wider py-3.5 rounded-xl border border-slate-800 transition duration-150 flex items-center justify-center space-x-2"
-          >
-            <Home className="w-4 h-4" />
-            <span>Main Menu</span>
-          </button>
+        <div className="flex flex-col space-y-2.5 pt-2">
+          {onNextRace && (
+            <button
+              onClick={onNextRace}
+              className="w-full bg-gradient-to-r from-blue-500 via-cyan-500 to-blue-600 hover:brightness-105 text-white font-extrabold uppercase text-xs tracking-widest py-4 rounded-xl border border-cyan-400/25 shadow-lg shadow-cyan-500/10 transition duration-150 flex items-center justify-center space-x-2 cursor-pointer"
+            >
+              <Award className="w-4 h-4 text-white fill-current animate-bounce" />
+              <span>Continue to Next Track</span>
+            </button>
+          )}
 
-          <button
-            onClick={onRestart}
-            className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-extrabold uppercase text-xs tracking-widest py-3.5 rounded-xl border border-blue-400 transition duration-150 shadow-lg flex items-center justify-center space-x-2"
-          >
-            <RotateCcw className="w-4 h-4" />
-            <span>Race Again</span>
-          </button>
+          <div className="flex space-x-3">
+            <button
+              onClick={onHome}
+              className="flex-1 bg-slate-950 hover:bg-slate-850 text-slate-300 font-bold uppercase text-xs tracking-wider py-3.5 rounded-xl border border-slate-800 transition duration-150 flex items-center justify-center space-x-2 cursor-pointer"
+            >
+              <Home className="w-4 h-4" />
+              <span>Garage Menu</span>
+            </button>
+
+            <button
+              onClick={onRestart}
+              className="flex-1 bg-slate-900 hover:bg-slate-800 text-slate-250 font-bold uppercase text-xs tracking-widest py-3.5 rounded-xl border border-slate-800 transition duration-150 flex items-center justify-center space-x-2 cursor-pointer"
+            >
+              <RotateCcw className="w-4 h-4" />
+              <span>Retry Race</span>
+            </button>
+          </div>
         </div>
 
       </div>

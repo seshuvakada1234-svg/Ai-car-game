@@ -78,6 +78,7 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame }) => {
   const [playerName, setPlayerName] = useState('Speedster');
   const [difficulty, setDifficulty] = useState<Difficulty>('medium');
   const [selectedCar, setSelectedCar] = useState<'lamborghini' | 'ferrari' | 'bugatti' | 'porsche'>('lamborghini');
+  const [selectedMap, setSelectedMap] = useState<'map1' | 'map2'>('map1');
 
   // Custom livery paint hex defaults to the selected car's standard color preset (automatically set on car swap)
   const [carColor, setCarColor] = useState('#ff5500');
@@ -114,7 +115,8 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame }) => {
           playerName: playerName.trim() || 'Racer',
           difficulty,
           carColor,
-          selectedCar
+          selectedCar,
+          selectedMap
         });
       }, 1000);
 
@@ -304,6 +306,74 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame }) => {
               </motion.div>
             );
           })}
+        </div>
+      </div>
+
+      {/* MAP SELECTION SECTION */}
+      <div className="w-full max-w-7xl mx-auto flex flex-col space-y-4 mb-6 text-left">
+        <h2 className="text-sm font-black uppercase tracking-wider text-slate-400 flex items-center space-x-1.5">
+          <span className="w-1.5 h-3.5 bg-cyan-400 rounded-sm inline-block"></span>
+          <span>Select Race Arena Map</span>
+        </h2>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Map 1: Dragon Mountain Pass */}
+          <div
+            onClick={() => setSelectedMap('map1')}
+            className={`cursor-pointer p-5 rounded-2xl border transition-all ${
+              selectedMap === 'map1'
+                ? 'bg-blue-600/10 border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.25)]'
+                : 'bg-slate-900/40 border-slate-800 hover:border-slate-700'
+            }`}
+          >
+            <div className="flex justify-between items-start">
+              <div>
+                <h3 className="font-extrabold text-[#7ee1fc] uppercase tracking-wide">Dragon Mountain Pass (Map 1)</h3>
+                <p className="text-[11px] text-slate-400 mt-1 max-w-md leading-normal">
+                  Challenge ascending hairpins, misty alpine bridges, and cherry blossom shrines under deep twilight skies. High altitude curves.
+                </p>
+                <div className="mt-4 flex gap-4 text-[10px] font-mono text-slate-400">
+                  <span>DISTANCE: 4.15 KM</span>
+                  <span>LAPS: 3</span>
+                  <span>SURFACE: DRIFT-TARMAC</span>
+                </div>
+              </div>
+              <span className={`text-[10px] uppercase font-bold tracking-widest px-2.5 py-0.5 rounded transition ${
+                selectedMap === 'map1' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400'
+              }`}>
+                {selectedMap === 'map1' ? 'Selected' : 'Select'}
+              </span>
+            </div>
+          </div>
+
+          {/* Map 2: Coastal Sunset Circuit */}
+          <div
+            onClick={() => setSelectedMap('map2')}
+            className={`cursor-pointer p-5 rounded-2xl border transition-all ${
+              selectedMap === 'map2'
+                ? 'bg-cyan-500/10 border-cyan-400 shadow-[0_0_15px_rgba(34,211,238,0.25)]'
+                : 'bg-slate-900/40 border-slate-800 hover:border-slate-700'
+            }`}
+          >
+            <div className="flex justify-between items-start">
+              <div>
+                <h3 className="font-extrabold text-cyan-400 uppercase tracking-wide">Coastal Sunset Circuit (Map 2)</h3>
+                <p className="text-[11px] text-slate-400 mt-1 max-w-md leading-normal">
+                  Speed past palm dunes, neon tunnels, and crowded harbor docks under a glorious sunset. Super-optimized fast looping road.
+                </p>
+                <div className="mt-4 flex gap-4 text-[10px] font-mono text-cyan-400">
+                  <span>DISTANCE: 2.5 KM</span>
+                  <span>LAPS: 3</span>
+                  <span>SURFACE: COASTAL HIGHWAY</span>
+                </div>
+              </div>
+              <span className={`text-[10px] uppercase font-bold tracking-widest px-2.5 py-0.5 rounded transition ${
+                selectedMap === 'map2' ? 'bg-cyan-500 text-slate-950 font-extrabold' : 'bg-slate-800 text-slate-400'
+              }`}>
+                {selectedMap === 'map2' ? 'Selected' : 'Select'}
+              </span>
+            </div>
+          </div>
         </div>
       </div>
 

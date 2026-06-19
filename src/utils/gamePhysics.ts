@@ -10,7 +10,7 @@ import { particleSystem } from '../world/particleSystem';
 import { SuspensionSystem, SuspensionState } from './suspension';
 import { CarCollisionSystem } from './carCollision';
 import { TrafficAIService } from './trafficAI';
-import { terrainManager } from '../world/terrainManager';
+import { terrainManager } from '../world/TerrainManager';
 import { MemoryPool } from './memoryPool';
 
 // Constant physical constraints matching hypercar simulator performance

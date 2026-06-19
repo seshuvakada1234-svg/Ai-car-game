@@ -275,33 +275,50 @@ export function buildTerrain(scene: THREE.Scene, trackHelper: TrackGeometryHelpe
   chunkManager.initialize(scene, trackHelper);
   chunkManager.update(new THREE.Vector3(0, 0, 0));
 
-  // --- 4. EMERALD JADE LAKE ---
-  const lakeGeo = new THREE.PlaneGeometry(450, 450);
-  const lakeMat = new THREE.MeshStandardMaterial({
-    color: '#0e2d4d', // rich deep midnight teal
-    roughness: 0.08,
-    metalness: 0.85,
-    transparent: true,
-    opacity: 0.90,
-  });
-  const lake = new THREE.Mesh(lakeGeo, lakeMat);
-  lake.rotation.x = -Math.PI / 2;
-  lake.position.set(50, -9.8, -120);
-  scene.add(lake);
+  // --- 4. WATER BODY SYSTEM ---
+  if (trackHelper.mapType === 'map1') {
+    // EMERALD JADE LAKE
+    const lakeGeo = new THREE.PlaneGeometry(450, 450);
+    const lakeMat = new THREE.MeshStandardMaterial({
+      color: '#0e2d4d', // rich deep midnight teal
+      roughness: 0.08,
+      metalness: 0.85,
+      transparent: true,
+      opacity: 0.90,
+    });
+    const lake = new THREE.Mesh(lakeGeo, lakeMat);
+    lake.rotation.x = -Math.PI / 2;
+    lake.position.set(50, -9.8, -120);
+    scene.add(lake);
 
-  // --- 5. CANYON GORGE RIVER UNDER BRIDGE ---
-  const riverGeo = new THREE.PlaneGeometry(600, 600); // slightly wider to engulf deep walls
-  const riverMat = new THREE.MeshStandardMaterial({
-    color: '#0b243b', // rapid dark canyon river
-    roughness: 0.05,
-    metalness: 0.90,
-    transparent: true,
-    opacity: 0.88,
-  });
-  const river = new THREE.Mesh(riverGeo, riverMat);
-  river.rotation.x = -Math.PI / 2;
-  river.position.set(900, -84.8, 3225); // lowered deep into the gorgebed!
-  scene.add(river);
+    // CANYON GORGE RIVER UNDER BRIDGE
+    const riverGeo = new THREE.PlaneGeometry(600, 600); // slightly wider to engulf deep walls
+    const riverMat = new THREE.MeshStandardMaterial({
+      color: '#0b243b', // rapid dark canyon river
+      roughness: 0.05,
+      metalness: 0.90,
+      transparent: true,
+      opacity: 0.88,
+    });
+    const river = new THREE.Mesh(riverGeo, riverMat);
+    river.rotation.x = -Math.PI / 2;
+    river.position.set(900, -84.8, 3225); // lowered deep into the gorgebed!
+    scene.add(river);
+  } else {
+    // HIGH FIDELITY COASTAL SUNSET OCEAN WATER PLANE
+    const oceanGeo = new THREE.PlaneGeometry(5000, 5000);
+    const oceanMat = new THREE.MeshStandardMaterial({
+      color: '#072e3d', // gorgeous deep coastal ocean teal-blue
+      roughness: 0.12,
+      metalness: 0.92,
+      transparent: true,
+      opacity: 0.88,
+    });
+    const ocean = new THREE.Mesh(oceanGeo, oceanMat);
+    ocean.rotation.x = -Math.PI / 2;
+    ocean.position.set(300, -0.6, 100); // ocean sits at y = -0.6 (just below sand height of 1.2)
+    scene.add(ocean);
+  }
 
   // Return a dummy mesh for typescript compilation & interface compatibility
   const dummyMesh = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({ visible: false }));

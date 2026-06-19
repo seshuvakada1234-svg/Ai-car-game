@@ -173,6 +173,12 @@ export default function App() {
     // Reset vehicle added state
     (window as any).playerCarAddedToScene = false;
 
+    // Apply exact player selected map
+    const activeMap = cfg.selectedMap || 'map1';
+    const helper = new TrackGeometryHelper(activeMap);
+    trackHelperRef.current = helper;
+    physicsServiceRef.current = new GamePhysicsService(helper);
+
     setSettings(cfg);
     setElapsedTime(0);
     setIsPaused(false);
@@ -215,6 +221,20 @@ export default function App() {
   const handleRestartRace = () => {
     if (settings) {
       handleStartGame(settings);
+    } else {
+      setPhase('menu');
+    }
+  };
+
+  // Automatically load the alternate track (Map 1 <-> Map 2) and boot it up
+  const handleNextRace = () => {
+    if (settings) {
+      const nextMap = settings.selectedMap === 'map2' ? 'map1' : 'map2';
+      const updatedSettings = {
+        ...settings,
+        selectedMap: nextMap as 'map1' | 'map2',
+      };
+      handleStartGame(updatedSettings);
     } else {
       setPhase('menu');
     }
@@ -340,6 +360,7 @@ export default function App() {
           elapsedTime={elapsedTime}
           onRestart={handleRestartRace}
           onHome={handleHomeMenu}
+          onNextRace={handleNextRace}
         />
       )}
 

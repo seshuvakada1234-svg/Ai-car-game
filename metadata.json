@@ -1,6 +1,6 @@
 {
   "name": "AI Race Arena Live",
-  "description": "A premium high-performance 3D arcade racing game set in Dragon Mountain Pass with AI opponents, drift effects, and realistic physics.",
+  "description": "A premium high-performance 3D arcade racing game set in Dragon Mountain Pass and Coastal Sunset Circuit with AI opponents, drift effects, and realistic physics.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
