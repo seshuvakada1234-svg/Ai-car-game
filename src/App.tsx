@@ -12,6 +12,7 @@ import { GameCanvas } from './components/GameCanvas';
 import { HUD } from './components/HUD';
 import { Menu } from './components/Menu';
 import { GameOver } from './components/GameOver';
+import { SplashScreen } from './components/SplashScreen';
 import { Trophy, Compass, Sparkles, Volume2, VolumeX, AlertCircle, Sun, Cloud, CloudRain, CloudFog, Moon } from 'lucide-react';
 import { selectRandomPlayerCar, setPlayerSelectedModelKey } from './world/procedural';
 
@@ -52,6 +53,7 @@ function AppBody() {
   const { profile } = useAuth();
 
   // Game states orchestration
+  const [showSplash, setShowSplash] = useState(true);
   const [phase, setPhase] = useState<GamePhase>('menu');
   const [settings, setSettings] = useState<GameSettings | null>(null);
   const [isPaused, setIsPaused] = useState(false);
@@ -691,6 +693,10 @@ function AppBody() {
       </div>
     );
   };
+
+  if (showSplash) {
+    return <SplashScreen onComplete={() => setShowSplash(false)} />;
+  }
 
   return (
     <Routes>

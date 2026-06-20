@@ -12,6 +12,7 @@ import { terrainManager } from '../world/TerrainManager';
 import { CarState, ControlsState } from '../types';
 import * as THREE from 'three';
 import { Compass, Loader2 } from 'lucide-react';
+import { LoadingScreen } from './LoadingScreen';
 
 export const UserRacePage: React.FC = () => {
   const { roomCode } = useParams<{ roomCode: string }>();
@@ -274,10 +275,11 @@ export const UserRacePage: React.FC = () => {
 
   if (phase === 'loading' || cars.length === 0) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-white space-y-4 font-sans">
-        <Loader2 className="w-12 h-12 text-cyan-400 animate-spin" />
-        <span className="font-mono text-xs tracking-widest uppercase text-slate-400">Loading Racing Arena Grid...</span>
-      </div>
+      <LoadingScreen 
+        progress={78} 
+        message="Authenticating race satellite link... configuring active suspension torque rates" 
+        subMessage="Optimizing peer collision grids on firestore" 
+      />
     );
   }
 

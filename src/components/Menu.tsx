@@ -11,7 +11,7 @@ import { Difficulty, GameSettings } from '../types';
 import { 
   Zap, Trophy, HelpCircle, Sparkles, Download, CheckCircle, 
   AlertOctagon, Users, Radio, Key, Coins, Gem, Car, ArrowLeft, 
-  Plus, Paintbrush, Wrench, Play, X, Compass, ChevronRight, Star, Heart
+  Plus, Paintbrush, Wrench, Play, X, Compass, ChevronRight, Star, Heart, Gauge, ShieldCheck, Gamepad2, Settings
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { loadSpecificCarModel, gltfModelCache, setPlayerSelectedModelKey } from '../world/procedural';
@@ -140,40 +140,39 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
     chassis: 75
   });
 
-  // Top Bar In-game currencies state
+  // Currencies HUD state
   const [trophicCount, setTrophicCount] = useState(2450);
   const [coinCount, setCoinCount] = useState(18250);
   const [diamondCount, setDiamondCount] = useState(450);
   const [keyCount, setKeyCount] = useState(12);
 
-  // Dynamic customization preset toggle
+  // Toggle HUD sub-menus to prevent vertical side panel clutter
   const [customizerOpen, setCustomizerOpen] = useState(false);
+  const [presetsPanelOpen, setPresetsPanelOpen] = useState(false);
 
-  // MULTIPLAYER POPUPS & LOBBIES STATES
+  // Matchmaker state HUD
   const [activePopup, setActivePopup] = useState<'none' | 'create_room' | 'join_room' | 'lobby'>('none');
   const [createdRoomName, setCreatedRoomName] = useState(`${playerName}'s Grid`);
   const [generatedCode, setGeneratedCode] = useState('');
   const [enteredJoinCode, setEnteredJoinCode] = useState('');
   const [joinError, setJoinError] = useState<string | null>(null);
 
-  // Firestore Room synced lists
+  // Matchmaking real-time variables
   const [syncedRoom, setSyncedRoom] = useState<NormalRoom | null>(null);
   const [syncedPlayers, setSyncedPlayers] = useState<NormalPlayer[]>([]);
   const [countdownMsg, setCountdownMsg] = useState('');
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
 
-  // 3D Showroom Refs
+  // WebGL Showroom rendering refs
   const showroomCanvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const carGroupRef = useRef<THREE.Group | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
 
-  // Synchronize dynamic metadata based on choice
   const currentVehicleMetadata = CARS_GARAGE.find(c => c.id === selectedCar)!;
 
-  // Track change values on select
+  // Sync color & performance specs on select
   useEffect(() => {
-    // Sync current color and maintenance specs
     setCarColor(currentVehicleMetadata.colorPreset);
     setMaintenanceLevels({
       oil: currentVehicleMetadata.oil,
@@ -182,29 +181,25 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
     });
   }, [selectedCar]);
 
-  // Load selected model for live rendering on showroom scene
+  // Live download preloader
   useEffect(() => {
     let isCancelled = false;
-
     const triggerPreload = async () => {
       try {
         await loadSpecificCarModel(selectedCar, () => {});
         if (isCancelled) return;
-
-        // Rebuilt mesh inside showroom
         rebuildShowroomCar();
       } catch (err) {
-        console.error("3D Showroom failed downloading:", err);
+        console.error("3D Showroom failing:", err);
       }
     };
-
     triggerPreload();
     return () => {
       isCancelled = true;
     };
   }, [selectedCar]);
 
-  // Interactive 3D Showroom Setup
+  // ThreeJS Showroom scene pipeline
   useEffect(() => {
     if (!showroomCanvasRef.current) return;
 
@@ -212,13 +207,11 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
     const scene = new THREE.Scene();
     sceneRef.current = scene;
 
-    // Dark majestic atmospheric smoke/fog
-    scene.background = new THREE.Color('#03050a');
-    scene.fog = new THREE.FogExp2('#03050a', 0.08);
+    scene.background = new THREE.Color('#010205');
+    scene.fog = new THREE.FogExp2('#010205', 0.08);
 
     const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
-    // Low camera angle inspired by NFS/Asphalt
-    camera.position.set(0, 0.75, 5.0);
+    camera.position.set(0, 0.75, 4.8);
 
     const renderer = new THREE.WebGLRenderer({
       canvas: showroomCanvasRef.current,
@@ -230,9 +223,8 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.0;
+    renderer.toneMappingExposure = 1.15;
 
-    // Resize controller
     const resizeHandler = () => {
       if (!containerRef.current) return;
       const w = containerRef.current.clientWidth;
@@ -244,12 +236,12 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
     resizeHandler();
     window.addEventListener('resize', resizeHandler);
 
-    // Grid Floor with dynamic shadows & glossy metallics
+    // Reflective Metallic Flooring
     const floorGeo = new THREE.PlaneGeometry(50, 50);
     const floorMat = new THREE.MeshStandardMaterial({
-      color: '#080d1a',
-      roughness: 0.15,
-      metalness: 0.9,
+      color: '#040712',
+      roughness: 0.1,
+      metalness: 0.95,
     });
     const floor = new THREE.Mesh(floorGeo, floorMat);
     floor.rotation.x = -Math.PI / 2;
@@ -257,97 +249,86 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
     floor.receiveShadow = true;
     scene.add(floor);
 
-    // Glowing Neon Grid accents line
-    const gridHelper = new THREE.GridHelper(40, 40, '#00f2ff', '#101630');
+    // Neon Cyber Grid
+    const gridHelper = new THREE.GridHelper(40, 40, '#00f2ff', '#121b3a');
     gridHelper.position.y = -0.11;
-    (gridHelper.material as any).opacity = 0.12;
+    (gridHelper.material as any).opacity = 0.14;
     (gridHelper.material as any).transparent = true;
     scene.add(gridHelper);
 
-    // Blue Neon accent standing lights inside the premium garage
+    // Standing Glow Tubes
     const neonMatCyan = new THREE.MeshBasicMaterial({ color: '#00f2ff' });
-    const neonMatBlue = new THREE.MeshBasicMaterial({ color: '#003cff' });
-
-    // Tubes left and right
+    const neonMatBlue = new THREE.MeshBasicMaterial({ color: '#0033ff' });
     const tubeGeo = new THREE.CylinderGeometry(0.015, 0.015, 6, 8);
-    
+
     const tube1 = new THREE.Mesh(tubeGeo, neonMatCyan);
-    tube1.position.set(-3.2, 2.5, -3.0);
+    tube1.position.set(-3.5, 2.5, -3.0);
     scene.add(tube1);
 
     const tube2 = new THREE.Mesh(tubeGeo, neonMatBlue);
-    tube2.position.set(3.2, 2.5, -3.0);
+    tube2.position.set(3.5, 2.5, -3.0);
     scene.add(tube2);
 
     const tube3 = new THREE.Mesh(tubeGeo, neonMatCyan);
-    tube3.position.set(-4.0, 2.5, 1.0);
+    tube3.position.set(-4.5, 2.5, 1.0);
     scene.add(tube3);
 
     const tube4 = new THREE.Mesh(tubeGeo, neonMatBlue);
-    tube4.position.set(4.0, 2.5, 1.0);
+    tube4.position.set(4.5, 2.5, 1.0);
     scene.add(tube4);
 
-    // Add neon light points for shiny reflections
-    const rLightLeft = new THREE.PointLight('#00f2ff', 4.0, 15);
-    rLightLeft.position.set(-3.2, 1.2, -1.0);
+    const rLightLeft = new THREE.PointLight('#00f2ff', 5.0, 15);
+    rLightLeft.position.set(-3.5, 1.2, -1.0);
     scene.add(rLightLeft);
 
-    const rLightRight = new THREE.PointLight('#0033ff', 4.0, 15);
-    rLightRight.position.set(3.2, 1.2, -1.0);
+    const rLightRight = new THREE.PointLight('#0033ff', 5.0, 15);
+    rLightRight.position.set(3.5, 1.2, -1.0);
     scene.add(rLightRight);
 
-    // Scene Main light rigging
-    const ambientLight = new THREE.AmbientLight('#0b1022', 1.2);
+    const ambientLight = new THREE.AmbientLight('#080d1e', 1.4);
     scene.add(ambientLight);
 
-    // Top primary warm spot highlighting car center
-    const mainSpot = new THREE.SpotLight('#ffffff', 15.0, 12, Math.PI / 4, 0.5, 1.0);
-    mainSpot.position.set(0, 4.0, 1.5);
+    const mainSpot = new THREE.SpotLight('#ffffff', 18.0, 15, Math.PI / 4, 0.4, 1.0);
+    mainSpot.position.set(0, 4.2, 1.8);
     mainSpot.castShadow = true;
     mainSpot.shadow.bias = -0.0002;
     mainSpot.shadow.mapSize.width = 1024;
     mainSpot.shadow.mapSize.height = 1024;
     scene.add(mainSpot);
 
-    // Cinematic back light
-    const backSpot = new THREE.DirectionalLight('#42c1f9', 2.0);
-    backSpot.position.set(0, 2.5, -4.0);
+    const backSpot = new THREE.DirectionalLight('#00f2ff', 2.5);
+    backSpot.position.set(0, 2.5, -4.5);
     scene.add(backSpot);
 
-    // Sparkles particles
-    const particleCount = 80;
+    // Stardust Sparkles
+    const particleCount = 100;
     const particleGeo = new THREE.BufferGeometry();
     const positions = new Float32Array(particleCount * 3);
     for (let i = 0; i < particleCount; i++) {
-      positions[i * 3] = (Math.random() - 0.5) * 8.0;
-      positions[i * 3 + 1] = Math.random() * 3.5;
-      positions[i * 3 + 2] = (Math.random() - 0.5) * 8.0;
+      positions[i * 3] = (Math.random() - 0.5) * 10.0;
+      positions[i * 3 + 1] = Math.random() * 4.0;
+      positions[i * 3 + 2] = (Math.random() - 0.5) * 10.0;
     }
     particleGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     const particleMat = new THREE.PointsMaterial({
       color: '#00f2ff',
       size: 0.02,
       transparent: true,
-      opacity: 0.45,
+      opacity: 0.5,
     });
     const particles = new THREE.Points(particleGeo, particleMat);
     scene.add(particles);
 
-    // Continuous 60 fps rendering loop
+    // Low angle rotation orbit
     let angle = 0;
     const renderLoop = () => {
       animFrame = requestAnimationFrame(renderLoop);
+      angle += 0.0018; 
+      camera.position.x = 4.4 * Math.cos(angle);
+      camera.position.z = 4.4 * Math.sin(angle);
+      camera.lookAt(0, 0.2, 0);
 
-      // Slow orbital rotate around the car index (parallax cameras)
-      angle += 0.0022; // very slow cinematic rotation
-      camera.position.x = 4.3 * Math.cos(angle);
-      camera.position.z = 4.3 * Math.sin(angle);
-      camera.lookAt(0, 0.22, 0);
-
-      // Rotate sparkles
-      particles.rotation.y += 0.001;
-
-      // Render scene
+      particles.rotation.y += 0.0008;
       renderer.render(scene, camera);
     };
     animFrame = requestAnimationFrame(renderLoop);
@@ -359,18 +340,16 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
     };
   }, []);
 
-  // Live render color changer
+  // Sync paint color swaps immediately
   useEffect(() => {
     if (!carGroupRef.current) return;
     updateMaterialColors(carGroupRef.current, carColor);
   }, [carColor]);
 
-  // Methods to traverse and apply custom paint live
   const updateMaterialColors = (model: THREE.Group, hex: string) => {
     model.traverse((child) => {
       if (child instanceof THREE.Mesh) {
         const name = child.name.toLowerCase();
-        // Match common car paint material nodes
         if (
           name.includes('paint') || 
           name.includes('body') || 
@@ -379,10 +358,8 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
           child.material.name?.toLowerCase().includes('car_paint') ||
           (child.material instanceof THREE.MeshStandardMaterial && child.material.roughness < 0.15 && child.material.metalness > 0.8)
         ) {
-          if (child.material instanceof THREE.Material) {
-            if ('color' in child.material) {
-              (child.material as any).color.set(hex);
-            }
+          if (child.material instanceof THREE.Material && 'color' in child.material) {
+            (child.material as any).color.set(hex);
           }
         }
       }
@@ -393,7 +370,6 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
     const scene = sceneRef.current;
     if (!scene) return;
 
-    // Flush old car meshes
     if (carGroupRef.current) {
       scene.remove(carGroupRef.current);
       carGroupRef.current = null;
@@ -407,32 +383,26 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
     const baseModel = gltfModelCache[modelKey];
     if (baseModel) {
       const cloned = baseModel.clone();
-      cloned.position.set(0, -0.05, 0);
+      cloned.position.set(0, -0.06, 0);
       cloned.rotation.y = 0;
       
       const s = currentVehicleMetadata.scale;
       cloned.scale.set(s, s, s);
 
-      // Traverses shadow mappings config
       cloned.traverse(c => {
         if (c instanceof THREE.Mesh) {
           c.castShadow = true;
           c.receiveShadow = true;
-          if (c.material) {
-            c.material.needsUpdate = true;
-          }
+          if (c.material) c.material.needsUpdate = true;
         }
       });
 
-      // Apply hex paint color
       updateMaterialColors(cloned, carColor);
-
       scene.add(cloned);
       carGroupRef.current = cloned;
     }
   };
 
-  // Launch single-player gameplay pipeline
   const handleStartProcess = async (action: 'single' | 'create' | 'join') => {
     setLoadStatus('downloading');
     setProgress(0);
@@ -445,7 +415,6 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
       setProgress(100);
       setLoadStatus('ready');
 
-      // 1.5s delay for dynamic visual confirmation feedback
       setTimeout(() => {
         const payload: GameSettings = {
           playerName: playerName.trim() || 'Racer',
@@ -465,17 +434,15 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
           onStartGame(payload);
           navigate('/race');
         }
-      }, 1200);
+      }, 1000);
 
     } catch (err) {
-      console.error("Preparation crashed:", err);
+      console.error("Showroom loading errored:", err);
       setLoadStatus('failed');
     }
   };
 
-  // MULTIPLAYER FIREBASE OPERATIONS
   const handleCreateRoomClick = () => {
-    // Generates a AAA style room code (e.g. BLAZE456)
     const code = RoomCodeGenerator.generate();
     setGeneratedCode(code.toUpperCase());
     setCreatedRoomName(`${playerName}'s Grid`);
@@ -485,7 +452,6 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
   const handleConfirmCreateRoom = async () => {
     if (!profile) return;
     try {
-      // Use Firestore Room creation
       await NormalRoomService.createRoom(
         profile.uid,
         playerName || 'Racer',
@@ -493,10 +459,6 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
         selectedCar,
         selectedMap
       );
-      
-      // Override or write the room setup custom generated code if necessary, or let Room Manager manage
-      // Write custom code with Firebase NormalRoomService standard
-      // Since NormalRoomService uses dynamic autogen inside, let's trigger and sync listen!
       subscribeToRoomListeners(generatedCode);
       setActivePopup('lobby');
     } catch (err) {
@@ -525,28 +487,23 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
         playerName || 'Racer',
         profile.photoURL || ''
       );
-      
       subscribeToRoomListeners(cleanCode);
       setActivePopup('lobby');
     } catch (err: any) {
-      setJoinError(err.message || 'Room code not found or lobby list full.');
+      setJoinError(err.message || 'Lobby full or invalid code.');
     }
   };
 
-  // Subscribes live listeners to firestore matchmaking room
   const subscribeToRoomListeners = (code: string) => {
     const cleanCode = code.toUpperCase().trim();
     setGeneratedCode(cleanCode);
 
     const unsubRoom = NormalRoomService.listenToRoom(cleanCode, (room) => {
       if (!room) {
-        // Canceled
         setActivePopup('none');
         return;
       }
       setSyncedRoom(room);
-
-      // Handle racing trigger redirection
       if (room.status === 'racing') {
         navigate(`/race/${cleanCode}`);
       }
@@ -556,11 +513,9 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
       setSyncedPlayers(players);
     });
 
-    // Save unsubscribe to clean up when we leave
     (window as any).activeRoomUnsubscribers = [unsubRoom, unsubPlayers];
   };
 
-  // Clean room subscriptions
   const cleanRoomListeners = () => {
     if ((window as any).activeRoomUnsubscribers) {
       (window as any).activeRoomUnsubscribers.forEach((fn: any) => fn());
@@ -582,16 +537,12 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
     }
   };
 
-  // Count down logic in Lobby
   useEffect(() => {
     if (!syncedRoom || syncedRoom.status !== 'countdown') {
       setSecondsLeft(null);
       return;
     }
-
-    if (secondsLeft === null) {
-      setSecondsLeft(5);
-    }
+    if (secondsLeft === null) setSecondsLeft(5);
 
     const interval = setInterval(() => {
       setSecondsLeft((prev) => {
@@ -599,7 +550,6 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
         if (prev <= 1) {
           clearInterval(interval);
           setCountdownMsg('GO!');
-          
           setTimeout(() => {
             const isHost = syncedRoom && profile ? syncedRoom.ownerUid === profile.uid : false;
             if (isHost) {
@@ -616,16 +566,14 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
     return () => clearInterval(interval);
   }, [syncedRoom?.status, secondsLeft]);
 
-  // Restores repair status to 100% with sound effects
   const handleRestoreMaintenance = () => {
     setShowMaintenanceSplash(true);
     setMaintenanceLevels({ oil: 100, engine: 100, chassis: 100 });
     setTimeout(() => {
       setShowMaintenanceSplash(false);
-    }, 1000);
+    }, 1200);
   };
 
-  // Add keys, coins, items
   const handleResourceAdd = (type: 'trophy' | 'key' | 'coin' | 'diamond') => {
     if (type === 'trophy') setTrophicCount(prev => prev + 50);
     if (type === 'key') setKeyCount(prev => prev + 1);
@@ -637,7 +585,7 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
     <div 
       ref={containerRef}
       id="game-garage-root" 
-      className="relative w-screen h-[100dvh] overflow-hidden bg-black text-white select-none m-0 p-0 rounded-none max-w-none border-none outline-none font-sans"
+      className="relative w-screen h-[100dvh] overflow-hidden bg-[#020306] text-white select-none m-0 p-0 rounded-none max-w-none border-none outline-none font-sans"
       style={{
         position: 'fixed',
         inset: 0,
@@ -646,372 +594,285 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
         overflow: 'hidden'
       }}
     >
-      {/* 3D WebGL Canvas Showroom background */}
+      {/* 3D WebGL Showroom background */}
       <canvas ref={showroomCanvasRef} className="absolute inset-0 z-0 w-full h-full block" />
 
-      {/* Volumetric neon background fog shadows overlay */}
-      <div className="absolute inset-0 z-10 pointer-events-none bg-gradient-to-t from-black via-transparent to-black/40" />
+      {/* Atmospheric vignette overlays */}
+      <div className="absolute inset-0 z-10 pointer-events-none bg-gradient-to-t from-[#010205] via-transparent to-black/35" />
 
-      {/* TOP BAR (Height: 80px) */}
+      {/* ==================== 1. TOP BAR HUD OVERLAY ==================== */}
       <div 
         id="top-bar-hud"
-        className="absolute top-0 left-0 right-0 h-20 z-20 px-8 flex items-center justify-between border-b border-white/5 shadow-2xl"
-        style={{
-          background: 'rgba(5, 5, 5, 0.45)',
-          backdropFilter: 'blur(16px)',
-        }}
+        className="absolute top-0 left-0 right-0 h-18 z-20 px-8 flex items-center justify-between pointer-events-auto bg-gradient-to-b from-black/60 to-transparent"
       >
-        {/* Left Side: Back / Title */}
         <div className="flex items-center space-x-4">
           <button 
             onClick={() => navigate('/')} 
-            className="p-2 border border-white/10 rounded-xl hover:bg-white/10 active:scale-90 transition-all cursor-pointer"
+            className="p-1.5 border border-white/10 rounded-xl hover:bg-white/10 active:scale-90 transition cursor-pointer flex items-center justify-center bg-black/40"
           >
-            <ArrowLeft className="w-5 h-5 text-slate-200" />
+            <ArrowLeft className="w-4 h-4 text-slate-350" />
           </button>
-          <div className="h-8 w-[1px] bg-white/10" />
+          <div className="h-6 w-[1.5px] bg-white/10" />
           <div className="flex items-center space-x-3">
-            <div className="p-1.5 bg-gradient-to-r from-blue-600 to-cyan-500 rounded-lg shadow-lg">
-              <Car className="w-5 h-5 text-white" />
+            <div className="p-1.5 bg-gradient-to-r from-blue-700 to-cyan-500 rounded-lg shadow-lg">
+              <Car className="w-4.5 h-4.5 text-white" />
             </div>
             <div>
-              <span className="text-[9px] uppercase font-black tracking-widest text-[#00f2ff] block">GRID ARENA SHOWROOM</span>
-              <h2 className="text-xl font-black uppercase tracking-tighter text-white font-sans">GARAGE</h2>
+              <span className="text-[8px] uppercase font-black tracking-widest text-[#00f2ff] block">GRID ARENA</span>
+              <h2 className="text-base font-black uppercase tracking-tight text-white font-sans">GARAGE SHOWROOM</h2>
             </div>
           </div>
         </div>
 
-        {/* Right Side: Currency Counters */}
-        <div className="flex items-center space-x-5 font-mono">
-          {/* Trophy Count */}
-          <div className="flex items-center space-x-2 bg-black/60 border border-white/5 rounded-xl px-3.5 py-1.5 relative group">
-            <Trophy className="w-4 h-4 text-amber-400 fill-amber-400" />
-            <span className="text-sm font-black text-white">{trophicCount.toLocaleString()}</span>
-            <button 
-              onClick={() => handleResourceAdd('trophy')}
-              className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black p-1 text-[8px] rounded-md transition-all active:scale-95 flex items-center justify-center shrink-0 ml-1 hover:brightness-110 cursor-pointer"
-            >
-              <Plus className="w-2.5 h-2.5 stroke-[4px]" />
+        {/* Center: Class Badge & Stars Floating */}
+        <div className="hidden md:flex items-center space-x-4 bg-black/65 border border-white/10 px-5 py-1.5 rounded-full select-none">
+          <span className="text-[10px] font-black tracking-[3px] text-white bg-gradient-to-r from-red-630 to-amber-500 px-3 py-1 rounded-full text-center">
+            {currentVehicleMetadata.class}
+          </span>
+          <div className="flex space-x-1">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Star 
+                key={i} 
+                className={`w-3.5 h-3.5 ${
+                  i < currentVehicleMetadata.stars 
+                    ? 'text-[#00f2ff] fill-[#00f2ff] drop-shadow-[0_0_6px_#00f2ffa5]' 
+                    : 'text-white/20'
+                }`} 
+              />
+            ))}
+          </div>
+        </div>
+
+        <div className="flex items-center space-x-4 font-mono sm:scale-100 scale-90 origin-right">
+          <div className="flex items-center space-x-2 bg-black/60 border border-white/5 rounded-xl px-3 py-1 relative">
+            <Trophy className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
+            <span className="text-xs font-black text-white">{trophicCount.toLocaleString()}</span>
+            <button onClick={() => handleResourceAdd('trophy')} className="bg-cyan-500 text-slate-950 font-black p-0.5 text-[8px] rounded transition ml-1 cursor-pointer">
+              <Plus className="w-2.5 h-2.5" />
             </button>
           </div>
 
-          {/* Keys */}
-          <div className="flex items-center space-x-2 bg-black/60 border border-white/5 rounded-xl px-3.5 py-1.5 relative group">
-            <Key className="w-4 h-4 text-emerald-400" />
-            <span className="text-sm font-black text-white">{keyCount}</span>
-            <button 
-              onClick={() => handleResourceAdd('key')}
-              className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black p-1 text-[8px] rounded-md transition-all active:scale-95 flex items-center justify-center shrink-0 ml-1 hover:brightness-110 cursor-pointer"
-            >
-              <Plus className="w-2.5 h-2.5 stroke-[4px]" />
+          <div className="flex items-center space-x-2 bg-black/60 border border-white/5 rounded-xl px-3 py-1 relative">
+            <Key className="w-3.5 h-3.5 text-emerald-400" />
+            <span className="text-xs font-black text-white">{keyCount}</span>
+            <button onClick={() => handleResourceAdd('key')} className="bg-cyan-500 text-slate-950 font-black p-0.5 text-[8px] rounded transition ml-1 cursor-pointer">
+              <Plus className="w-2.5 h-2.5" />
             </button>
           </div>
 
-          {/* Coins */}
-          <div className="flex items-center space-x-2 bg-black/60 border border-white/5 rounded-xl px-3.5 py-1.5 relative group">
-            <Coins className="w-4 h-4 text-yellow-400 fill-yellow-400" />
-            <span className="text-sm font-black text-white">{coinCount.toLocaleString()}</span>
-            <button 
-              onClick={() => handleResourceAdd('coin')}
-              className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black p-1 text-[8px] rounded-md transition-all active:scale-95 flex items-center justify-center shrink-0 ml-1 hover:brightness-110 cursor-pointer"
-            >
-              <Plus className="w-2.5 h-2.5 stroke-[4px]" />
-            </button>
-          </div>
-
-          {/* Diamonds */}
-          <div className="flex items-center space-x-2 bg-black/60 border border-white/5 rounded-xl px-3.5 py-1.5 relative group">
-            <Gem className="w-4 h-4 text-[#00f2ff] fill-[#00a6ff]" />
-            <span className="text-sm font-black text-white">{diamondCount}</span>
-            <button 
-              onClick={() => handleResourceAdd('diamond')}
-              className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black p-1 text-[8px] rounded-md transition-all active:scale-95 flex items-center justify-center shrink-0 ml-1 hover:brightness-110 cursor-pointer"
-            >
-              <Plus className="w-2.5 h-2.5 stroke-[4px]" />
+          <div className="flex items-center space-x-2 bg-black/60 border border-white/5 rounded-xl px-3 py-1 relative">
+            <Coins className="w-3.5 h-3.5 text-yellow-400 fill-yellow-400" />
+            <span className="text-xs font-black text-white">{coinCount.toLocaleString()}</span>
+            <button onClick={() => handleResourceAdd('coin')} className="bg-cyan-500 text-slate-950 font-black p-0.5 text-[8px] rounded transition ml-1 cursor-pointer">
+              <Plus className="w-2.5 h-2.5" />
             </button>
           </div>
         </div>
       </div>
 
-      {/* LEFT PANEL: Glass panel for vehicle info */}
-      <motion.div 
-        initial={{ opacity: 0, x: -120 }}
-        animate={{ opacity: 1, x: 0 }}
-        transition={{ duration: 0.5, ease: 'easeOut' }}
-        id="garage-left-panel"
-        className="absolute left-6 top-24 bottom-24 w-80 z-20 rounded-3xl border border-white/10 p-5 flex flex-col justify-between overflow-hidden shadow-2xl"
-        style={{
-          background: 'rgba(5, 5, 5, 0.45)',
-          backdropFilter: 'blur(20px)',
-        }}
-      >
-        <div className="space-y-4">
-          {/* Class Class Class badge & Star rating */}
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-black tracking-[4px] px-3.5 py-1.5 rounded-full bg-gradient-to-r from-red-600 to-amber-500 text-white shadow-xl shadow-red-500/20">
-              {currentVehicleMetadata.class}
-            </span>
-            <div className="flex space-x-1">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <Star 
-                  key={i} 
-                  className={`w-4 h-4 ${
-                    i < currentVehicleMetadata.stars 
-                      ? 'text-yellow-400 fill-yellow-400 drop-shadow-[0_0_8px_java(140,55,0,0.85)]' 
-                      : 'text-white/20'
-                  }`} 
-                />
-              ))}
-            </div>
+      {/* ==================== 2. FLOATING LEFT VECHILE SPECS & TUNING HUD ==================== */}
+      <div className="absolute left-6 top-22 z-20 w-72 flex flex-col space-y-4 pointer-events-auto">
+        
+        {/* Simple compact name and class display */}
+        <div className="p-4 rounded-2xl border border-white/15 bg-black/45 backdrop-blur-md">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[8px] font-mono font-black text-[#00f2ff] tracking-widest uppercase">TUNING PRESET ACTIVE</span>
+            <span className="text-[8px] font-mono px-2 py-0.5 bg-rose-500/10 text-rose-400 border border-rose-550/20 rounded-md font-bold uppercase">{selectedCar}</span>
           </div>
-
-          {/* Car Name */}
-          <div className="space-y-1 py-1">
-            <h1 className="text-3xl font-black uppercase tracking-tighter text-white max-h-[80px] leading-none">
-              {currentVehicleMetadata.name.split(' ')[0]}
-            </h1>
-            <h2 className="text-2xl font-light uppercase tracking-wide text-white/70 leading-none">
-              {currentVehicleMetadata.name.split(' ').slice(1).join(' ')}
-            </h2>
-          </div>
-
-          <p className="text-[11px] text-[#7ee1fc]/80 font-mono leading-relaxed bg-[#7ee1fc]/5 border border-[#7ee1fc]/10 p-2.5 rounded-2xl">
+          <h1 className="text-2xl font-black uppercase tracking-tighter text-white leading-none">
+            {currentVehicleMetadata.name}
+          </h1>
+          <p className="text-[10px] text-slate-400 font-medium leading-tight mt-1.5">
             {currentVehicleMetadata.desc}
           </p>
+        </div>
 
-          {/* Driver details inputs & difficulty options */}
-          <div className="space-y-2 pt-2 border-t border-white/10">
-            <span className="text-[8px] uppercase tracking-widest font-bold text-slate-400">Driver License Name</span>
-            <input 
-              type="text" 
-              value={playerName}
-              onChange={(e) => setPlayerName(e.target.value.slice(0, 16))}
-              className="w-full bg-black/60 border border-white/10 focus:border-[#00f2ff]/60 px-3.5 py-2 rounded-xl text-xs font-black text-white outline-none transition-all font-mono uppercase"
-            />
+        {/* Minimal specs bars overlay (No giant columns!) */}
+        <div className="p-4 rounded-2xl border border-white/15 bg-black/45 backdrop-blur-md space-y-3">
+          <div className="flex justify-between items-center pb-1 border-b border-white/5">
+            <span className="text-[8px] font-black uppercase tracking-widest text-[#00f2ff] font-mono">SPECIFICATION COCKPIT</span>
+            <span className="text-[8px] font-mono text-emerald-400 font-bold uppercase">CALIBRATION ONLINE</span>
           </div>
 
-          {/* Grid difficulty selection */}
-          <div className="space-y-2">
-            <span className="text-[8px] uppercase tracking-widest font-bold text-slate-400">Grid Enemy Difficulty</span>
-            <div className="flex bg-black/40 p-1 rounded-xl border border-white/5">
-              {(['easy', 'medium', 'hard'] as Difficulty[]).map(l => (
-                <button
-                  key={l}
-                  onClick={() => setDifficulty(l)}
-                  className={`flex-1 py-1.5 text-[9px] font-black uppercase rounded-lg transition-all cursor-pointer ${
-                    difficulty === l
-                      ? 'bg-gradient-to-r from-blue-600 to-cyan-500 text-white shadow-lg font-black'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  {l}
+          {/* Velocity Spec */}
+          <div className="space-y-1">
+            <div className="flex justify-between items-end text-[9px]">
+              <span className="font-bold text-slate-400 uppercase">Top Velocity</span>
+              <span className="font-mono font-black text-white">{currentVehicleMetadata.topSpeed} km/h</span>
+            </div>
+            <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-gradient-to-r from-blue-600 to-cyan-400 shadow-[0_0_8px_#00f2ffa5]"
+                style={{ width: `${(currentVehicleMetadata.topSpeed / 420) * 100}%` }}
+              />
+            </div>
+          </div>
+
+          {/* Accel Spec */}
+          <div className="space-y-1">
+            <div className="flex justify-between items-end text-[9px]">
+              <span className="font-bold text-slate-400 uppercase">Acceleration</span>
+              <span className="font-mono font-black text-white">{currentVehicleMetadata.acceleration}</span>
+            </div>
+            <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-gradient-to-r from-orange-600 to-amber-400 shadow-[0_0_8px_orange]"
+                style={{ width: selectedCar === 'bugatti' ? '100%' : selectedCar === 'lamborghini' ? '90%' : '80%' }}
+              />
+            </div>
+          </div>
+
+          {/* Grip handling Spec */}
+          <div className="space-y-1">
+            <div className="flex justify-between items-end text-[9px]">
+              <span className="font-bold text-slate-400 uppercase">Grip Handling</span>
+              <span className="font-mono font-black text-white">{currentVehicleMetadata.handling} / 100</span>
+            </div>
+            <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-gradient-to-r from-emerald-500 to-teal-400"
+                style={{ width: `${currentVehicleMetadata.handling}%` }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Minimal presets toggle buttons & License */}
+        <div className="flex space-x-2">
+          <button
+            onClick={() => setPresetsPanelOpen(!presetsPanelOpen)}
+            className="flex-1 py-2 bg-black/60 border border-white/10 text-white font-extrabold uppercase text-[9px] tracking-wider rounded-xl hover:bg-white/10 active:scale-95 transition cursor-pointer flex items-center justify-center space-x-1.5"
+          >
+            <Settings className="w-3 h-3 text-[#00f2ff]" />
+            <span>RACE PRESETS</span>
+          </button>
+          
+          <button
+            onClick={handleRestoreMaintenance}
+            className="py-2 px-3 bg-gradient-to-r from-amber-600/30 to-amber-500/30 border border-amber-500/45 text-amber-300 font-extrabold uppercase text-[9px] tracking-wider rounded-xl hover:brightness-110 active:scale-95 transition cursor-pointer flex items-center justify-center space-x-1.5"
+          >
+            <Wrench className="w-3 h-3 text-amber-400" />
+            <span>REPAIR ({maintenanceLevels.oil}%)</span>
+          </button>
+        </div>
+      </div>
+
+      {/* ==================== 3. RACE PRESETS CONFIG DRAWER (FLOATS OVER CHASSIS LEFT) ==================== */}
+      <AnimatePresence>
+        {presetsPanelOpen && (
+          <>
+            <div className="fixed inset-0 z-20 pointer-events-auto" onClick={() => setPresetsPanelOpen(false)} />
+            <motion.div
+              initial={{ opacity: 0, x: -50 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -50 }}
+              className="absolute left-6 top-85 z-30 w-72 p-4 rounded-2xl border border-white/20 bg-black/80 backdrop-blur-xl space-y-4"
+            >
+              <div className="flex items-center justify-between border-b border-white/5 pb-2">
+                <span className="text-[9px] font-black uppercase text-cyan-400 tracking-widest font-mono">MATCH REGISTRY</span>
+                <button onClick={() => setPresetsPanelOpen(false)} className="text-slate-400 p-0.5 hover:bg-white/10 rounded-lg">
+                  <X className="w-3.5 h-3.5" />
                 </button>
-              ))}
-            </div>
-          </div>
-        </div>
+              </div>
 
-        {/* Maintenance Diagnostics specs */}
-        <div className="space-y-3 pt-3 border-t border-white/10">
-          <div className="flex items-center justify-between">
-            <span className="text-[9px] font-black uppercase tracking-widest text-slate-300">DIAGNOSTICS</span>
-            <span className="text-[8px] font-mono text-emerald-400">STATUS LEVEL: OK</span>
-          </div>
+              {/* License Name input */}
+              <div className="space-y-1.5 text-left">
+                <label className="text-[8px] font-bold text-slate-400 uppercase tracking-widest block font-mono">Driver ID License Name</label>
+                <input 
+                  type="text" 
+                  value={playerName}
+                  onChange={(e) => setPlayerName(e.target.value.slice(0, 16))}
+                  className="w-full bg-black/60 border border-white/10 focus:border-[#00f2ff] px-3 py-1.5 rounded-xl text-xs font-black text-white outline-none font-mono uppercase"
+                />
+              </div>
 
-          {/* Oil status indicator */}
-          <div className="space-y-1">
-            <div className="flex justify-between text-[9px] font-mono text-slate-400">
-              <span>OIL RECHARGE</span>
-              <span className={`font-bold ${
-                maintenanceLevels.oil > 80 ? 'text-emerald-400' : maintenanceLevels.oil > 30 ? 'text-amber-500' : 'text-red-500'
-              }`}>{maintenanceLevels.oil}%</span>
-            </div>
-            <div className="w-full h-1.5 bg-black/80 rounded-full overflow-hidden border border-white/5">
-              <div 
-                className={`h-full rounded-full transition-all duration-500 ${
-                  maintenanceLevels.oil > 80 ? 'bg-emerald-400' : maintenanceLevels.oil > 30 ? 'bg-amber-500' : 'bg-red-500'
-                }`}
-                style={{ width: `${maintenanceLevels.oil}%` }}
-              />
-            </div>
-          </div>
+              {/* Race circuit dropdown */}
+              <div className="space-y-1.5 text-left">
+                <label className="text-[8px] font-bold text-slate-400 uppercase tracking-widest block font-mono">Race Circuit Path</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button 
+                    onClick={() => setSelectedMap('map1')}
+                    className={`py-1.5 text-[9px] font-black uppercase rounded-lg border text-center transition cursor-pointer ${
+                      selectedMap === 'map1'
+                        ? 'bg-blue-600/20 border-blue-500 text-blue-300'
+                        : 'bg-black/60 border-white/5 text-slate-400'
+                    }`}
+                  >
+                    🐲 DRAGON
+                  </button>
+                  <button 
+                    onClick={() => setSelectedMap('map2')}
+                    className={`py-1.5 text-[9px] font-black uppercase rounded-lg border text-center transition cursor-pointer ${
+                      selectedMap === 'map2'
+                        ? 'bg-cyan-600/20 border-cyan-500 text-cyan-300'
+                        : 'bg-black/60 border-white/5 text-slate-400'
+                    }`}
+                  >
+                    🌴 COASTAL
+                  </button>
+                </div>
+              </div>
 
-          {/* Engine status indicator */}
-          <div className="space-y-1">
-            <div className="flex justify-between text-[9px] font-mono text-slate-400">
-              <span>ENGINE COMPRESSION</span>
-              <span className="font-bold text-emerald-400">{maintenanceLevels.engine}%</span>
-            </div>
-            <div className="w-full h-1.5 bg-black/80 rounded-full overflow-hidden border border-white/5">
-              <div 
-                className="h-full rounded-full bg-emerald-400 transition-all duration-300"
-                style={{ width: `${maintenanceLevels.engine}%` }}
-              />
-            </div>
-          </div>
+              {/* Bot Difficulty */}
+              <div className="space-y-1.5 text-left">
+                <label className="text-[8px] font-bold text-slate-400 uppercase tracking-widest block font-mono">Enemy BOT Intensity</label>
+                <div className="flex bg-black/60 p-1 rounded-xl border border-white/5">
+                  {(['easy', 'medium', 'hard'] as Difficulty[]).map(l => (
+                    <button
+                      key={l}
+                      onClick={() => setDifficulty(l)}
+                      className={`flex-1 py-1 text-[8px] font-black uppercase rounded-lg transition-all cursor-pointer ${
+                        difficulty === l
+                          ? 'bg-gradient-to-r from-blue-700 to-cyan-500 text-white font-black'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {l}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
 
-          {/* Chassis integrity status indicator */}
-          <div className="space-y-1">
-            <div className="flex justify-between text-[9px] font-mono text-slate-400">
-              <span>SUSPENSION INTEGRITY</span>
-              <span className={`font-bold ${
-                maintenanceLevels.chassis > 70 ? 'text-emerald-400' : 'text-amber-500'
-              }`}>{maintenanceLevels.chassis}%</span>
-            </div>
-            <div className="w-full h-1.5 bg-black/80 rounded-full overflow-hidden border border-white/5">
-              <div 
-                className={`h-full rounded-full transition-all duration-300 ${
-                  maintenanceLevels.chassis > 70 ? 'bg-emerald-400' : 'bg-amber-500'
-                }`}
-                style={{ width: `${maintenanceLevels.chassis}%` }}
-              />
-            </div>
+      {/* ==================== 4. FLOATING RIGHT BOTTOM MULTIPLAYER GRID STAGINGS ==================== */}
+      <div className="absolute right-6 top-22 z-20 w-72 flex flex-col space-y-4 pointer-events-auto">
+        <div className="p-4 rounded-2xl border border-white/15 bg-black/45 backdrop-blur-md space-y-3.5">
+          <div className="flex items-center justify-between pb-1.5 border-b border-white/5">
+            <span className="text-[8px] font-black tracking-widest text-[#cfbeff] font-mono">MULTIPLAYER ARENA</span>
+            <span className="text-[8px] font-mono text-cyan-400 animate-pulse font-bold">GRID ACTIVE</span>
           </div>
-        </div>
-      </motion.div>
-
-      {/* RIGHT PANEL: Animated Performance Bars (inspired by CarX Drift Racing) */}
-      <motion.div 
-        initial={{ opacity: 0, x: 120 }}
-        animate={{ opacity: 1, x: 0 }}
-        transition={{ duration: 0.5, ease: 'easeOut' }}
-        id="performance-right-panel"
-        className="absolute right-6 top-24 bottom-24 w-80 z-20 rounded-3xl border border-white/10 p-5 flex flex-col justify-between"
-        style={{
-          background: 'rgba(5, 5, 5, 0.45)',
-          backdropFilter: 'blur(20px)',
-        }}
-      >
-        <div className="space-y-5">
-          <div className="border-b border-white/5 pb-2">
-            <span className="text-[10px] font-black tracking-widest text-[#00f2ff] uppercase block">VEHICLE SPECS</span>
-            <h3 className="text-sm font-black uppercase text-white font-mono">TUNING DATAS</h3>
-          </div>
-
-          {/* POWER SPEC (Orange) */}
-          <div className="space-y-2">
-            <div className="flex justify-between items-end">
-              <span className="text-[10px] font-black tracking-wider text-slate-400 uppercase">Engine Power</span>
-              <span className="text-sm font-mono font-black text-white">{currentVehicleMetadata.power}</span>
-            </div>
-            <div className="relative w-full h-2.5 bg-black/80 rounded-lg overflow-hidden border border-white/5">
-              <motion.div 
-                initial={{ width: 0 }}
-                animate={{ width: selectedCar === 'bugatti' ? '100%' : selectedCar === 'lamborghini' ? '80%' : selectedCar === 'ferrari' ? '74%' : '55%' }}
-                transition={{ duration: 0.6, ease: 'easeOut' }}
-                className="h-full bg-gradient-to-r from-orange-600 to-orange-400 rounded-lg shadow-[0_0_12px_rgba(234,88,12,0.4)]"
-              />
-            </div>
-          </div>
-
-          {/* ACCELERATION SPEC (Green) */}
-          <div className="space-y-2">
-            <div className="flex justify-between items-end">
-              <span className="text-[10px] font-black tracking-wider text-slate-400 uppercase">0 - 100 Accel</span>
-              <span className="text-sm font-mono font-black text-white">{currentVehicleMetadata.acceleration}</span>
-            </div>
-            <div className="relative w-full h-2.5 bg-black/80 rounded-lg overflow-hidden border border-white/5">
-              <motion.div 
-                initial={{ width: 0 }}
-                animate={{ width: selectedCar === 'bugatti' ? '100%' : selectedCar === 'lamborghini' ? '92%' : selectedCar === 'porsche' ? '82%' : '80%' }}
-                transition={{ duration: 0.6, ease: 'easeOut' }}
-                className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 rounded-lg shadow-[0_0_12px_rgba(16,185,129,0.4)]"
-              />
-            </div>
-          </div>
-
-          {/* TOP SPEED SPEC (Red) */}
-          <div className="space-y-2">
-            <div className="flex justify-between items-end">
-              <span className="text-[10px] font-black tracking-wider text-slate-400 uppercase">Top Velocity</span>
-              <span className="text-sm font-mono font-black text-white">{currentVehicleMetadata.topSpeed} km/h</span>
-            </div>
-            <div className="relative w-full h-2.5 bg-black/80 rounded-lg overflow-hidden border border-white/5">
-              <motion.div 
-                initial={{ width: 0 }}
-                animate={{ width: `${(currentVehicleMetadata.topSpeed / 420) * 100}%` }}
-                transition={{ duration: 0.6, ease: 'easeOut' }}
-                className="h-full bg-gradient-to-r from-red-600 to-rose-400 rounded-lg shadow-[0_0_12px_rgba(220,38,38,0.4)]"
-              />
-            </div>
-          </div>
-
-          {/* HANDLING SPEC (Blue) */}
-          <div className="space-y-2">
-            <div className="flex justify-between items-end">
-              <span className="text-[10px] font-black tracking-wider text-slate-400 uppercase">Grip Handling</span>
-              <span className="text-sm font-mono font-black text-white">{currentVehicleMetadata.handling} / 100</span>
-            </div>
-            <div className="relative w-full h-2.5 bg-black/80 rounded-lg overflow-hidden border border-white/5">
-              <motion.div 
-                initial={{ width: 0 }}
-                animate={{ width: `${currentVehicleMetadata.handling}%` }}
-                transition={{ duration: 0.6, ease: 'easeOut' }}
-                className="h-full bg-gradient-to-r from-cyan-600 to-blue-400 rounded-lg shadow-[0_0_12px_rgba(6,182,212,0.4)]"
-              />
-            </div>
-          </div>
-
-          {/* Select map route for starting standard single player */}
-          <div className="space-y-2 pt-3 border-t border-white/10 text-left">
-            <span className="text-[8px] uppercase tracking-widest font-bold text-slate-400">Race Circuit</span>
-            <div className="grid grid-cols-2 gap-2">
-              <button 
-                onClick={() => setSelectedMap('map1')}
-                className={`py-2 px-2 text-[9px] font-black uppercase rounded-xl transition border text-center cursor-pointer ${
-                  selectedMap === 'map1'
-                    ? 'bg-blue-600/10 border-blue-500 text-blue-300 shadow-[0_0_12px_rgba(59,130,246,0.25)]'
-                    : 'bg-[#000]/60 border-white/10 text-slate-400'
-                }`}
-              >
-                🐲 DRAGON (MAP 1)
-              </button>
-              <button 
-                onClick={() => setSelectedMap('map2')}
-                className={`py-2 px-2 text-[9px] font-black uppercase rounded-xl transition border text-center cursor-pointer ${
-                  selectedMap === 'map2'
-                    ? 'bg-cyan-600/10 border-cyan-500 text-cyan-300 shadow-[0_0_12px_rgba(6,182,212,0.25)]'
-                    : 'bg-[#000]/60 border-white/10 text-slate-400'
-                }`}
-              >
-                🌴 COASTAL (MAP 2)
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Dynamic game actions: Multiplayer Room Launchers (Neon glowing above control button stack) */}
-        <div className="space-y-4 pt-3 border-t border-white/10">
-          <div className="grid grid-cols-2 gap-2.5">
+          <p className="text-[10px] text-slate-300 leading-normal font-sans font-medium">
+            Challenge direct human opponents via shared lobbies using fanned invitation codes. Auto-syncs into direct racing servers.
+          </p>
+          <div className="grid grid-cols-2 gap-2">
             <button
               onClick={handleCreateRoomClick}
-              className="py-3 px-1 rounded-2xl bg-gradient-to-r from-purple-800 to-fuchsia-700 hover:from-purple-700 hover:to-fuchsia-600 text-white font-extrabold text-[10px] tracking-wider uppercase transition-all duration-300 active:scale-95 border border-purple-500/20 shadow-[0_0_15px_rgba(168,85,247,0.3)] hover:shadow-[0_0_25px_rgba(168,85,247,0.55)] cursor-pointer"
+              className="py-2.5 rounded-xl bg-gradient-to-r from-purple-800 to-fuchsia-700 hover:brightness-110 text-white font-extrabold text-[9px] tracking-wider uppercase transition border border-purple-500/20 shadow-[0_0_12px_rgba(168,85,247,0.25)] cursor-pointer"
             >
-              CREATE GAME ROOM
+              CREATE ROOM
             </button>
             <button
               onClick={handleJoinRoomClick}
-              className="py-3 px-1 rounded-2xl bg-gradient-to-r from-[#21124d] to-[#120a32] hover:bg-[#341270] text-[#cfbeff] font-extrabold text-[10px] tracking-wider uppercase transition-all duration-300 active:scale-95 border border-purple-850/60 shadow-inner cursor-pointer"
+              className="py-2.5 rounded-xl bg-black/75 hover:bg-[#341270] text-[#cfbeff] font-extrabold text-[9px] tracking-wider uppercase transition border border-purple-900/50 cursor-pointer"
             >
-              JOIN GAME ROOM
+              JOIN ROOM
             </button>
           </div>
         </div>
-      </motion.div>
+      </div>
 
-      {/* BOTTOM CAR CAROUSEL: Horizontal scrolling list */}
+      {/* ==================== 5. BOTTOM VEHICLE CAROUSEL GALLERY ==================== */}
       <div 
         id="bottom-showroom-carousel"
-        className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center space-y-3"
+        className="absolute bottom-6 left-6 z-20 flex flex-col items-start space-y-2 pointer-events-auto"
       >
-        <span className="text-[8px] font-black tracking-[4px] text-white/50 uppercase">CHOOSE HYPERCAR CHASSIS</span>
-        
+        <span className="text-[8px] font-black tracking-[4px] text-white/50 uppercase font-mono">CHOOSE CHASSIS COCKPIT</span>
         <div 
-          className="flex items-center space-x-4 max-w-[500px] overflow-x-auto overflow-y-visible px-4 py-2 scroll-smooth select-none hide-scrollbar"
-          style={{
-            scrollbarWidth: 'none',
-            msOverflowStyle: 'none'
-          }}
+          className="flex items-center space-x-3.5 overflow-x-auto overflow-y-visible py-1 px-1 max-w-lg scrollbar-none"
+          style={{ scrollbarWidth: 'none' }}
         >
           {CARS_GARAGE.map((car) => {
             const isSelected = selectedCar === car.id;
@@ -1019,21 +880,20 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
               <motion.div
                 key={car.id}
                 onClick={() => setSelectedCar(car.id)}
-                whileHover={{ scale: isSelected ? 1.12 : 1.05 }}
-                className={`flex-shrink-0 cursor-pointer transition-all duration-300 rounded-2xl p-1 relative w-24 h-16 overflow-hidden ${
+                whileHover={{ scale: isSelected ? 1.08 : 1.04 }}
+                className={`flex-shrink-0 cursor-pointer transition-all duration-300 rounded-xl p-[1px] relative w-20 h-13 overflow-hidden ${
                   isSelected 
-                    ? 'scale-110 shadow-[0_0_20px_#00ff88] border-2 border-[#00ff88]' 
+                    ? 'scale-105 shadow-[0_0_15px_#00ff88] border-2 border-[#00ff88]' 
                     : 'opacity-65 border border-white/10 hover:opacity-100'
                 }`}
               >
                 <img 
                   src={car.image} 
                   alt={car.name} 
-                  className="w-full h-full object-cover rounded-xl"
+                  className="w-full h-full object-cover rounded-lg"
                   referrerPolicy="no-referrer"
                 />
-                {/* Micro Class tag */}
-                <div className="absolute bottom-1 right-1 px-1 py-[1.5px] bg-black/85 text-[6.5px] font-sans font-black text-rose-400 rounded-md">
+                <div className="absolute bottom-0.5 right-0.5 px-1 py-[1px] bg-black/90 text-[5px] font-sans font-black text-[#00f2ff] rounded-md uppercase">
                   {car.class.split(' ')[0]}
                 </div>
               </motion.div>
@@ -1042,81 +902,69 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
         </div>
       </div>
 
-      {/* BOTTOM RIGHT BUTTONS: Large control triggers (Asphalt 9 Style) */}
+      {/* ==================== 6. BOTTOM RIGHT EXECUTION CONTROL DECK ==================== */}
       <div 
         id="garage-action-deck"
-        className="absolute bottom-6 right-6 z-20 flex space-x-3.5"
+        className="absolute bottom-6 right-6 z-20 flex space-x-3 pointer-events-auto"
       >
-        {/* MAINTENANCE PANEL restores status */}
-        <button
-          onClick={handleRestoreMaintenance}
-          style={{ width: '130px', height: '56px' }}
-          className="rounded-2xl border-b-4 border-amber-700 bg-gradient-to-r from-amber-600 to-amber-500 hover:brightness-110 text-white font-black text-xs uppercase tracking-widest transition-all duration-150 active:translate-y-[2px] active:border-b-0 shadow-lg flex flex-col items-center justify-center cursor-pointer"
-        >
-          <Wrench className="w-4 h-4 mb-0.5 text-white animate-bounce" />
-          <span>REPAIR</span>
-        </button>
-
-        {/* CUSTOMIZE Paint picker */}
+        {/* CUSTOMIZE Color picker key */}
         <button
           onClick={() => setCustomizerOpen(!customizerOpen)}
-          style={{ width: '130px', height: '56px' }}
-          className="rounded-2xl border-b-4 border-cyan-800 bg-gradient-to-r from-cyan-600 to-blue-500 hover:brightness-110 text-white font-black text-xs uppercase tracking-widest transition-all duration-150 active:translate-y-[2px] active:border-b-0 shadow-lg flex flex-col items-center justify-center cursor-pointer animate-pulse"
+          style={{ width: '120px', height: '50px' }}
+          className="rounded-2xl border-b-4 border-cyan-800 bg-gradient-to-r from-cyan-600 to-blue-500 hover:brightness-110 text-white font-black text-[11px] uppercase tracking-widest transition-all duration-150 active:translate-y-[2px] active:border-b-0 shadow-lg flex flex-col items-center justify-center cursor-pointer"
         >
-          <Paintbrush className="w-4 h-4 mb-0.5 text-white" />
+          <Paintbrush className="w-3.5 h-3.5 mb-0.5 text-white animate-pulse" />
           <span>PAINT</span>
         </button>
 
-        {/* USE launches single player */}
+        {/* Start Game Standard match */}
         <button
           id="btn-use-car"
           onClick={() => handleStartProcess('single')}
-          style={{ width: '160px', height: '56px' }}
-          className="rounded-2xl border-b-4 border-emerald-700 bg-gradient-to-r from-emerald-500 to-green-500 hover:brightness-110 text-neutral-950 font-black text-xs uppercase tracking-widest transition-all duration-150 active:translate-y-[2px] active:border-b-0 shadow-2xl shadow-emerald-500/30 flex flex-col items-center justify-center cursor-pointer"
+          style={{ width: '150px', height: '50px' }}
+          className="rounded-2xl border-b-4 border-emerald-700 bg-gradient-to-r from-emerald-500 to-green-500 hover:brightness-110 text-black font-black text-[11px] uppercase tracking-widest transition-all duration-150 active:translate-y-[2px] active:border-b-0 shadow-xl shadow-emerald-500/25 flex flex-col items-center justify-center cursor-pointer"
         >
-          <Play className="w-4 h-4 fill-current mb-0.5" />
+          <Play className="w-3.5 h-3.5 fill-current mb-0.5 text-neutral-950" />
           <span>START RACE</span>
         </button>
       </div>
+
+      {/* ==================== SCREEN POPUPS & METALLIC CUSTOMIZERS ==================== */}
 
       {/* ==================== CUSTOMIZE METALLIC COLOR DRAWER ==================== */}
       <AnimatePresence>
         {customizerOpen && (
           <>
-            {/* Backdrop */}
             <div className="fixed inset-0 z-30" onClick={() => setCustomizerOpen(false)} />
             <motion.div
               initial={{ opacity: 0, y: 50 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 50 }}
-              className="absolute bottom-24 right-6 w-96 max-w-full z-40 rounded-3xl border border-white/10 p-5 shadow-2xl space-y-4"
+              className="absolute bottom-22 right-6 w-80 max-w-full z-40 rounded-2xl border border-white/10 p-4 shadow-2xl space-y-4"
               style={{
-                background: 'rgba(5, 5, 5, 0.72)',
+                background: 'rgba(5, 5, 5, 0.85)',
                 backdropFilter: 'blur(24px)'
               }}
             >
               <div className="flex items-center justify-between border-b border-white/10 pb-2">
                 <div className="flex items-center space-x-2">
-                  <Paintbrush className="w-4 h-4 text-[#00f2ff]" />
-                  <span className="text-xs uppercase font-black tracking-widest text-[#00f2ff]">Supercar Paint Customizer</span>
+                  <Paintbrush className="w-3.5 h-3.5 text-[#00f2ff]" />
+                  <span className="text-[10px] uppercase font-black tracking-widest text-[#00f2ff] font-mono">Custom Paint picker</span>
                 </div>
-                <button 
-                  onClick={() => setCustomizerOpen(false)} 
-                  className="p-1 hover:bg-white/10 rounded-lg text-slate-400"
-                >
-                  <X className="w-4 h-4" />
+                <button onClick={() => setCustomizerOpen(false)} className="p-1 hover:bg-white/10 rounded-lg text-slate-450">
+                  <X className="w-3.5 h-3.5" />
                 </button>
               </div>
 
-              <div className="grid grid-cols-4 gap-2.5">
+              <div className="grid grid-cols-4 gap-2">
                 {METALLIC_COLORS.map((col) => (
                   <button
                     key={col.hex}
                     onClick={() => setCarColor(col.hex)}
-                    className={`h-11 rounded-xl flex items-center justify-center transition-all ${
+                    className={`h-9 rounded-lg flex items-center justify-center transition-all ${
                       carColor === col.hex 
-                        ? 'ring-2 ring-[#00ff88] scale-110 shadow-lg' 
-                        : 'opacity-85 hover:opacity-100 hover:scale-105'
+                        ? 'ring-2 ring-[#00ff88] scale-105 shadow-lg' 
+                        : 'opacity-85 hover:opacity-100'
                     }`}
                     style={{
                       backgroundColor: col.hex,
@@ -1125,86 +973,80 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
                     title={col.name}
                   >
                     {carColor === col.hex && (
-                      <CheckCircle className="w-4 h-4 text-slate-900 fill-white shrink-0 font-extrabold" />
+                      <CheckCircle className="w-3.5 h-3.5 text-slate-900 fill-white" />
                     )}
                   </button>
                 ))}
-              </div>
-              <div className="text-[10px] font-mono text-center text-[#cfbeff] leading-none pt-1">
-                Custom metal layers auto-configured. Reflective parameters mapped to HDR showroom.
               </div>
             </motion.div>
           </>
         )}
       </AnimatePresence>
 
-      {/* ==================== CREATE ROOM POPUP OVERLAY ==================== */}
+      {/* ==================== CREATE MULTIPLAYER ROOM OVERLAY ==================== */}
       <AnimatePresence>
         {activePopup === 'create_room' && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md">
             <motion.div
-              initial={{ scale: 0.92, opacity: 0 }}
+              initial={{ scale: 0.94, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.92, opacity: 0 }}
-              className="w-full max-w-md p-6 rounded-3xl border border-white/10 shadow-2xl relative space-y-6"
+              exit={{ scale: 0.94, opacity: 0 }}
+              className="w-full max-w-sm p-6 rounded-3xl border border-white/10 shadow-3xl relative space-y-5"
               style={{
-                background: 'rgba(10, 10, 10, 0.85)',
-                backdropFilter: 'blur(24px)'
+                background: 'rgba(8, 10, 16, 0.9)',
+                backdropFilter: 'blur(30px)'
               }}
             >
-              <div className="flex justify-between items-center border-b border-white/5 pb-3">
-                <span className="text-xs font-black tracking-widest text-purple-400 uppercase">STAGING MULTIPLAYER HOST</span>
+              <div className="flex justify-between items-center border-b border-white/5 pb-2.5">
+                <span className="text-xs font-black tracking-widest text-fuchsia-400 uppercase font-mono">HOST STAGING GRID</span>
                 <button onClick={() => setActivePopup('none')} className="p-1 hover:bg-white/10 rounded-lg text-slate-400">
-                  <X className="w-5 h-5" />
+                  <X className="w-4.5 h-4.5" />
                 </button>
               </div>
 
-              <div className="space-y-4 text-left">
-                {/* Room code display */}
-                <div className="bg-purple-950/20 border border-purple-500/20 rounded-2xl p-4 text-center space-y-1 shadow-inner relative overflow-hidden">
-                  <div className="absolute -top-10 -left-10 w-24 h-24 bg-purple-500/10 rounded-full blur-xl pointer-events-none" />
-                  <span className="text-[9px] uppercase tracking-widest font-bold text-purple-300">GENERATING ROOM CODE</span>
-                  <p className="text-3xl font-mono font-black tracking-[3px] text-white select-all">{generatedCode}</p>
+              <div className="space-y-4 text-left font-sans">
+                <div className="bg-purple-950/20 border border-purple-500/25 rounded-2xl p-4 text-center space-y-1">
+                  <span className="text-[9px] uppercase tracking-widest font-black text-purple-300 font-mono">INVITATION CODE</span>
+                  <p className="text-2xl font-mono font-black tracking-[4px] text-white select-all">{generatedCode}</p>
                 </div>
 
-                {/* Nickname input */}
                 <div className="space-y-1.5">
-                  <label className="text-[9px] uppercase tracking-wider font-bold text-slate-400">Setup Room Lobby Label</label>
+                  <label className="text-[8px] uppercase tracking-widest font-black text-slate-400 block font-mono">Setup Room Label</label>
                   <input
                     type="text"
                     value={createdRoomName}
                     onChange={(e) => setCreatedRoomName(e.target.value)}
-                    className="w-full bg-black/60 border border-white/10 focus:border-purple-500 rounded-xl px-3.5 py-2 text-xs font-black text-white uppercase outline-none transition-all font-mono"
+                    className="w-full bg-black/60 border border-white/10 focus:border-purple-555 rounded-xl px-3 py-2 text-xs font-black text-white uppercase outline-none font-mono"
                   />
                 </div>
 
-                <div className="flex justify-between bg-black/40 border border-white/5 rounded-2xl p-3.5 text-xs font-mono">
+                <div className="flex justify-between bg-black/40 border border-white/5 rounded-2xl p-3 text-xs font-mono">
                   <div className="flex flex-col">
-                    <span className="text-[8px] text-slate-500">MAX PLAYERS</span>
-                    <span className="font-bold text-purple-400">3 PLAYERS</span>
+                    <span className="text-[8px] text-slate-500 font-bold uppercase">MAX COUNT</span>
+                    <span className="font-bold text-fuchsia-404">3 PLAYERS</span>
                   </div>
                   <div className="w-[1px] bg-white/5" />
                   <div className="flex flex-col text-right">
-                    <span className="text-[8px] text-slate-500">CIRCUIT ARENA</span>
+                    <span className="text-[8px] text-slate-500 font-bold uppercase">ENVIRONMENT CIRCUITS</span>
                     <span className="font-bold text-cyan-400 uppercase">
-                      {selectedMap === 'map1' ? 'Dragon Mountain' : 'Coastal Sunset'}
+                      {selectedMap === 'map1' ? 'Dragon Pass' : 'Coastal Beach'}
                     </span>
                   </div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3 pb-1.5">
+              <div className="grid grid-cols-2 gap-3">
                 <button
                   onClick={() => setActivePopup('none')}
-                  className="py-3 bg-white/5 hover:bg-white/10 text-slate-300 rounded-2xl font-bold uppercase text-[10px] tracking-widest transition cursor-pointer"
+                  className="py-2.5 bg-white/5 hover:bg-white/10 text-slate-350 rounded-xl font-bold uppercase text-[9px] tracking-widest transition cursor-pointer"
                 >
                   CANCEL
                 </button>
                 <button
                   onClick={handleConfirmCreateRoom}
-                  className="py-3 bg-gradient-to-r from-purple-700 to-fuchsia-600 hover:from-purple-600 hover:to-fuchsia-500 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest transition shadow-lg shadow-purple-500/20 active:scale-[0.98] cursor-pointer"
+                  className="py-2.5 bg-gradient-to-r from-purple-700 to-fuchsia-600 hover:brightness-110 text-white rounded-xl font-black uppercase text-[9px] tracking-widest transition shadow-lg shadow-purple-500/25 cursor-pointer animate-pulse"
                 >
-                  START ROOM
+                  OPEN LOBBY
                 </button>
               </div>
             </motion.div>
@@ -1212,31 +1054,31 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
         )}
       </AnimatePresence>
 
-      {/* ==================== JOIN ROOM POPUP OVERLAY ==================== */}
+      {/* ==================== JOIN MULTIPLAYER ROOM OVERLAY ==================== */}
       <AnimatePresence>
         {activePopup === 'join_room' && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md">
             <motion.div
-              initial={{ scale: 0.92, opacity: 0 }}
+              initial={{ scale: 0.94, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.92, opacity: 0 }}
-              className="w-full max-w-sm p-6 rounded-3xl border border-white/10 shadow-2xl relative space-y-5"
+              exit={{ scale: 0.94, opacity: 0 }}
+              className="w-full max-w-xs p-6 rounded-3xl border border-white/10 shadow-3xl relative space-y-5"
               style={{
-                background: 'rgba(10, 10, 10, 0.85)',
-                backdropFilter: 'blur(24px)'
+                background: 'rgba(8, 10, 16, 0.9)',
+                backdropFilter: 'blur(30px)'
               }}
             >
-              <div className="flex justify-between items-center border-b border-white/5 pb-3">
-                <span className="text-xs font-black tracking-widest text-[#cfbeff] uppercase">PEER RUNMATCH MATCHMAKING</span>
+              <div className="flex justify-between items-center border-b border-white/5 pb-2">
+                <span className="text-xs font-black tracking-widest text-cyan-400 uppercase font-mono">PEER MATCHMAKER</span>
                 <button onClick={() => setActivePopup('none')} className="p-1 hover:bg-white/10 rounded-lg text-slate-400">
-                  <X className="w-5 h-5" />
+                  <X className="w-4.5 h-4.5" />
                 </button>
               </div>
 
               <div className="space-y-4 text-left">
                 <div className="space-y-2">
-                  <label className="text-[9px] uppercase tracking-widest font-black text-slate-400 block text-center">
-                    Enter Invitation Room Code
+                  <label className="text-[9px] uppercase tracking-widest font-black text-slate-400 block text-center font-mono">
+                    Enter Active Room Code
                   </label>
                   <input
                     type="text"
@@ -1245,32 +1087,32 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
                       setEnteredJoinCode(e.target.value.toUpperCase());
                       setJoinError(null);
                     }}
-                    placeholder="DRAGON123"
-                    className="w-full bg-black/60 border border-white/10 focus:border-purple-500 rounded-2xl px-4 py-3 text-2xl font-mono font-black text-center text-white outline-none tracking-[5px] transition-all uppercase uppercase"
+                    placeholder="DRAGON99"
+                    className="w-full bg-black/70 border border-white/10 focus:border-cyan-500 rounded-xl px-4 py-3 text-xl font-mono font-black text-center text-[#00f2ff] outline-none tracking-[4px] transition-all uppercase"
                   />
                 </div>
 
                 {joinError && (
-                  <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-400 text-[10px] rounded-xl text-center font-bold">
+                  <div className="p-2.5 bg-red-500/10 border border-red-500/20 text-red-400 text-[10px] rounded-xl text-center font-bold font-mono">
                     {joinError}
                   </div>
                 )}
               </div>
 
-              <div className="grid grid-cols-2 gap-3 pt-2">
+              <div className="grid grid-cols-2 gap-3">
                 <button
                   type="button"
                   onClick={() => setActivePopup('none')}
-                  className="py-3 bg-white/5 hover:bg-white/10 text-slate-300 rounded-2xl font-bold uppercase text-[10px] tracking-widest transition cursor-pointer"
+                  className="py-2.5 bg-white/5 hover:bg-white/10 text-slate-350 rounded-xl font-bold uppercase text-[9px] tracking-widest transition cursor-pointer"
                 >
                   CANCEL
                 </button>
                 <button
                   type="button"
                   onClick={handleConfirmJoinRoom}
-                  className="py-3 bg-gradient-to-r from-purple-700 to-fuchsia-600 hover:from-purple-600 hover:to-fuchsia-500 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest transition shadow-lg shadow-purple-500/20 active:scale-[0.98] cursor-pointer"
+                  className="py-2.5 bg-gradient-to-r from-blue-700 via-blue-600 to-cyan-500 hover:brightness-110 text-white rounded-xl font-black uppercase text-[9px] tracking-widest transition shadow-lg cursor-pointer"
                 >
-                  JOIN ROOM
+                  JOIN GRID
                 </button>
               </div>
             </motion.div>
@@ -1278,7 +1120,7 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
         )}
       </AnimatePresence>
 
-      {/* ==================== MULTIPLAYER CONNECTED ROOM LOBBY ==================== */}
+      {/* ==================== ACTIVE MULTIPLAYER LOBBY SCREEN (HUD DESIGN!) ==================== */}
       <AnimatePresence>
         {activePopup === 'lobby' && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md">
@@ -1286,98 +1128,93 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="w-full max-w-3xl p-6 rounded-3xl border border-white/10 shadow-2xl relative space-y-6 flex flex-col justify-between"
+              className="w-full max-w-2xl p-6 rounded-3xl border border-white/10 shadow-3xl flex flex-col justify-between space-y-6"
               style={{
-                background: 'rgba(10, 10, 10, 0.9)',
-                backdropFilter: 'blur(30px)'
+                background: 'rgba(5, 7, 10, 0.95)',
+                backdropFilter: 'blur(32px)'
               }}
             >
-              {/* Top info */}
               <div className="flex justify-between items-center border-b border-white/5 pb-4">
-                <div className="flex items-center space-x-2.5">
-                  <Compass className="w-5 h-5 text-purple-400 rotate-45" />
+                <div className="flex items-center space-x-3">
+                  <Users className="w-5 h-5 text-purple-400" />
                   <div>
                     <span className="text-[8px] font-mono font-black text-purple-400 block tracking-widest">
-                      MULTIPLAYER ACTIVE SATELLITE
+                      SYNCHRONOUS MATCHMAKER STAGING
                     </span>
-                    <h3 className="text-base font-black text-white uppercase">{syncedRoom?.ownerName}'s Arena</h3>
+                    <h3 className="text-base font-black text-white uppercase">{syncedRoom?.ownerName}'s Grid Staging</h3>
                   </div>
                 </div>
 
-                <div className="flex items-center space-x-4 bg-purple-500/10 border border-purple-500/20 rounded-2xl px-5 py-2 font-mono text-center relative shadow-lg">
-                  <div className="absolute top-0 bottom-0 left-0 right-0 animate-pulse pointer-events-none" />
-                  <div>
-                    <span className="text-[8px] text-purple-300 uppercase block tracking-wider">ROOM CODE</span>
-                    <span className="text-lg font-black text-white tracking-[2px]">{generatedCode}</span>
-                  </div>
+                <div className="bg-purple-950/30 border border-purple-500/20 rounded-2xl px-5 py-1.5 font-mono text-center">
+                  <span className="text-[8px] text-purple-300 block font-bold leading-none mb-0.5 uppercase">ROOM CODE</span>
+                  <span className="text-base font-black text-white tracking-[2px]">{generatedCode}</span>
                 </div>
               </div>
 
-              {/* Player list segment */}
-              <div className="space-y-3.5 text-left flex-1 py-1">
-                <div className="flex items-center justify-between text-[11px] font-black uppercase text-slate-400 tracking-wider">
-                  <span>CONNECTED GRID RAILS ({syncedPlayers.length} / 3 CONNECTED)</span>
-                  <span className="text-purple-400 animate-pulse">WAITING FOR PEERS...</span>
+              <div className="space-y-3.5 text-left flex-1">
+                <div className="flex items-center justify-between text-[10px] font-black uppercase text-slate-400 tracking-wider">
+                  <span>ACTIVE RACER GRID ({syncedPlayers.length} / 3 SEATS FILLED)</span>
+                  <span className="text-purple-400 animate-pulse font-mono flex items-center space-x-1">
+                    <span className="w-1.5 h-1.5 bg-purple-500 rounded-full animate-ping" />
+                    <span>STAGING SATELLITE ACTIVE</span>
+                  </span>
                 </div>
 
-                {/* 3 Grid Rows representing player slots */}
-                <div className="space-y-2.5">
+                <div className="grid grid-cols-1 gap-2.5">
                   {Array.from({ length: 3 }).map((_, idx) => {
                     const loadedPlayer = syncedPlayers[idx];
                     if (loadedPlayer) {
                       const isMe = profile && loadedPlayer.uid === profile.uid;
-                      const hasLambo = syncedRoom?.selectedCar === 'lamborghini';
+                      const currentCarId = syncedRoom?.selectedCar || 'lamborghini';
+                      const details = CARS_GARAGE.find(c => c.id === currentCarId);
                       return (
                         <div 
                           key={loadedPlayer.uid}
-                          className="flex items-center justify-between bg-white/5 border border-white/10 p-4 rounded-2xl shadow-lg relative overflow-hidden"
+                          className="flex items-center justify-between bg-white/5 border border-white/15 p-3 rounded-2xl shadow-lg relative overflow-hidden"
                         >
                           <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-t from-purple-600 to-cyan-400" />
-                          <div className="flex items-center space-x-4">
+                          <div className="flex items-center space-x-3">
                             <img 
                               src={loadedPlayer.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80'} 
                               alt={loadedPlayer.playerName} 
-                              className="w-10 h-10 object-cover rounded-full border border-white/20 shrink-0"
+                              className="w-10 h-10 object-cover rounded-full border border-white/10 shrink-0"
                             />
                             <div>
                               <div className="flex items-center space-x-2">
-                                <span className="text-sm font-black uppercase text-white truncate max-w-[150px]">
+                                <span className="text-xs font-black uppercase text-white truncate max-w-[120px]">
                                   {loadedPlayer.playerName}
                                 </span>
                                 {isMe && (
-                                  <span className="bg-cyan-500 text-slate-950 text-[7px] font-bold uppercase tracking-wider px-1.5 py-[1px] rounded">
+                                  <span className="bg-cyan-500 text-slate-950 text-[7px] font-black uppercase tracking-widest px-1 py-[0.5px] rounded">
                                     YOU
                                   </span>
                                 )}
                               </div>
-                              <span className="text-[9px] font-mono text-slate-400 uppercase">
-                                CHASSIS: {CARS_GARAGE.find(c => c.id === (syncedRoom?.selectedCar || 'lamborghini'))?.name || 'Lamborghini'}
+                              <span className="text-[8px] font-mono text-slate-400 uppercase leading-none font-bold">
+                                ACTIVE CHASSIS: {details?.name || 'Lamborghini'} ({details?.class})
                               </span>
                             </div>
                           </div>
-
-                          <div className="flex items-center space-x-4">
-                            <span className="text-[10px] font-black px-3.5 py-1.5 rounded-xl bg-black/60 border border-white/5 text-slate-300">
-                              ★ READY
-                            </span>
-                          </div>
+                          <span className="text-[9px] font-black px-3 py-1 bg-black/60 border border-white/5 text-emerald-400 rounded-lg">
+                            ★ STANDSTILL READY
+                          </span>
                         </div>
                       );
                     } else {
                       return (
                         <div 
                           key={`empty-${idx}`}
-                          className="flex items-center justify-between bg-black/40 border border-dashed border-white/10 p-4 rounded-2xl h-[74px] opacity-45 relative"
+                          className="flex items-center justify-between bg-black/45 border border-dashed border-white/10 p-3 rounded-2xl h-[56px] opacity-40 relative"
                         >
-                          <div className="flex items-center space-x-3.5">
-                            <div className="w-10 h-10 rounded-full border border-dashed border-white/20 flex items-center justify-center shrink-0">
-                              <Users className="w-5 h-5 text-slate-500" />
+                          <div className="flex items-center space-x-3">
+                            <div className="w-8 h-8 rounded-full border border-dashed border-white/20 flex items-center justify-center shrink-0">
+                              <Users className="w-4 h-4 text-slate-500" />
                             </div>
-                            <span className="text-xs font-mono font-bold uppercase tracking-widest text-slate-500">
-                              WAITING FOR ENROLLER...
+                            <span className="text-[9px] font-mono font-bold uppercase tracking-wider text-slate-505">
+                              WAITING FOR RACER SLOT...
                             </span>
                           </div>
-                          <span className="text-[8px] font-bold text-slate-500 tracking-widest">SLOT {idx + 1}</span>
+                          <span className="text-[8px] font-bold text-slate-500 font-mono">SEAT {idx + 1}</span>
                         </div>
                       );
                     }
@@ -1385,27 +1222,26 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
                 </div>
               </div>
 
-              {/* Lobby settings recap */}
-              <div className="bg-black/40 border border-white/5 rounded-2xl p-4 flex justify-around text-center text-xs font-mono py-3">
+              <div className="bg-black/60 border border-white/5 rounded-xl p-3 flex justify-around text-center text-[10px] font-mono py-2.5">
                 <div className="flex flex-col">
-                  <span className="text-[8px] text-slate-500 uppercase">MAP INDEX</span>
-                  <span className="font-bold text-cyan-400 uppercase">
-                    {syncedRoom?.mapId === 'map1' ? 'Dragon Mountain Pass' : 'Coastal Sunset Circuit'}
+                  <span className="text-[8px] text-slate-500 font-bold uppercase block leading-none">CIRCUIT CODES</span>
+                  <span className="font-bold text-cyan-400 uppercase mt-0.5">
+                    {syncedRoom?.mapId === 'map1' ? 'Dragon Pass Circuit' : 'Coastal Sunset Circuit'}
                   </span>
                 </div>
                 <div className="w-[1px] bg-white/5" />
                 <div className="flex flex-col">
-                  <span className="text-[8px] text-slate-500 uppercase">MAX COUNT</span>
-                  <span className="font-bold text-purple-400 uppercase">3 RACERS max</span>
+                  <span className="text-[8px] text-slate-500 font-bold uppercase block leading-none">MATCH REGULATION</span>
+                  <span className="font-bold text-purple-400 uppercase mt-0.5">3 RACERS LIMIT</span>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4 pt-2">
+              <div className="grid grid-cols-2 gap-3.5 pt-1">
                 <button
                   onClick={handleLeaveLobby}
-                  className="py-3.5 bg-white/5 hover:bg-white/10 text-slate-300 rounded-2xl font-bold uppercase text-xs tracking-widest transition cursor-pointer"
+                  className="py-3 bg-white/5 hover:bg-white/10 text-slate-300 rounded-2xl font-black uppercase text-[10px] tracking-widest transition cursor-pointer"
                 >
-                  EXIT STAGE
+                  ABANDON ASSEMBLY
                 </button>
                 <button
                   disabled={syncedPlayers.length < 3 && !syncedRoom?.isLiveMode}
@@ -1414,7 +1250,7 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
                       await NormalRoomService.setRoomStatus(generatedCode, 'countdown');
                     }
                   }}
-                  className="py-3.5 bg-gradient-to-r from-purple-700 to-fuchsia-600 hover:brightness-110 text-white rounded-2xl font-black uppercase text-xs tracking-widest transition shadow-lg shadow-purple-500/25 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  className="py-3 bg-gradient-to-r from-purple-700 to-fuchsia-600 hover:brightness-110 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest transition shadow-lg shadow-purple-500/25 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                 >
                   START RACE NOW
                 </button>
@@ -1444,7 +1280,7 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
         )}
       </AnimatePresence>
 
-      {/* ==================== REPAIR RESTORATION CELEBRATARY TOAST ==================== */}
+      {/* ==================== REPAIR RESTORATION TOAST ==================== */}
       <AnimatePresence>
         {showMaintenanceSplash && (
           <motion.div
@@ -1454,7 +1290,7 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
             className="fixed top-24 left-1/2 -translate-x-1/2 z-50 bg-emerald-500 border border-emerald-400 text-slate-950 px-8 py-3 rounded-2xl shadow-2xl flex items-center space-x-3 text-sm font-black uppercase"
           >
             <CheckCircle className="w-5 h-5 animate-spin fill-white text-emerald-500 shrink-0" />
-            <span>DIAGNOSTICS UPDATED: ALL SYSTEMS REPAIRED!</span>
+            <span>DIAGNOSTICS UPDATED: ALL CHASSIS TUNED BACK TO 100%!</span>
           </motion.div>
         )}
       </AnimatePresence>
@@ -1466,28 +1302,28 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/95 backdrop-blur-xl pointer-events-auto"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-[#030612]/95 backdrop-blur-xl pointer-events-auto"
           >
-            <div className="w-full max-w-md p-8 rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl text-center flex flex-col items-center space-y-6 relative overflow-hidden">
+            <div className="w-full max-w-md p-8 rounded-3xl bg-[#04091a] border border-white/5 shadow-2xl text-center flex flex-col items-center space-y-6 relative overflow-hidden">
               <div className="absolute w-80 h-80 bg-cyan-500/5 rounded-full blur-[80px]" />
 
               {loadStatus === 'downloading' && (
                 <>
                   <div className="w-16 h-16 rounded-full border-t-2 border-r-2 border-cyan-400 animate-spin flex items-center justify-center shadow-[0_0_20px_rgba(34,211,238,0.2)]">
-                    <Download className="w-6 h-6 text-cyan-400 animate-pulse" />
+                    <Download className="w-5 h-5 text-cyan-400 animate-pulse" />
                   </div>
 
-                  <div className="space-y-1.5">
+                  <div className="space-y-1.50">
                     <h3 className="text-xl font-black uppercase tracking-widest text-slate-200">
                       Preparing vehicle...
                     </h3>
-                    <p className="text-xs text-[#7ee1fc] font-bold">
+                    <p className="text-xs text-[#00f2ff] font-bold">
                       Configuring {CARS_GARAGE.find(c => c.id === selectedCar)?.name}...
                     </p>
                   </div>
 
                   <div className="w-full space-y-2">
-                    <div className="relative w-full h-2 bg-slate-950 rounded-full overflow-hidden border border-slate-800/80">
+                    <div className="relative w-full h-2 bg-black rounded-full overflow-hidden border border-white/5">
                       <motion.div 
                         className="absolute h-full bg-gradient-to-r from-blue-500 via-cyan-400 to-teal-400 shadow-[0_0_10px_rgba(34,211,238,0.5)] animate-pulse"
                         style={{ width: `${progress}%` }}
@@ -1495,7 +1331,7 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
                       />
                     </div>
                     <div className="flex justify-between items-center text-[10px] font-mono text-cyan-400 font-bold">
-                      <span>DATACENTER REPOSITORY</span>
+                      <span>DATACENTER TELEMETRY RECON</span>
                       <span>{progress}%</span>
                     </div>
                   </div>
@@ -1508,12 +1344,12 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
                     <CheckCircle className="w-8 h-8 text-emerald-400" />
                   </div>
 
-                  <div className="space-y-1.5">
-                    <h3 className="text-2xl font-black uppercase tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-teal-300">
-                      Vehicle Ready
+                  <div className="space-y-1.5 text-center">
+                    <h3 className="text-2xl font-black uppercase tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-teal-350">
+                      Vehicle Calibrated
                     </h3>
                     <p className="text-xs text-slate-400">
-                      Chassis calibrated. Calibrating system components...
+                      Tuning profile loaded successfully. Transitioning...
                     </p>
                   </div>
                 </>
@@ -1556,7 +1392,6 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
           </motion.div>
         )}
       </AnimatePresence>
-
     </div>
   );
 };
