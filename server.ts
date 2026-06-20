@@ -1,6 +1,8 @@
 import express from "express";
 import path from "path";
+import http from "http";
 import { createServer as createViteServer } from "vite";
+import { setupMultiplayerWebSocket } from "./src/multiplayer/multiplayerServer";
 
 async function startServer() {
   const app = express();
@@ -55,11 +57,18 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`[Proxy Server] Running on http://localhost:${PORT}`);
+  // Create standard HTTP server wrapping express app
+  const server = http.createServer(app);
+
+  // Setup multiplayer real-time sync WebSocket services
+  setupMultiplayerWebSocket(server);
+
+  server.listen(PORT, "0.0.0.0", () => {
+    console.log(`[Proxy & Multiplayer Server] Running on http://localhost:${PORT}`);
   });
 }
 
 startServer().catch((err) => {
   console.error("Failed to start full-stack server:", err);
 });
+

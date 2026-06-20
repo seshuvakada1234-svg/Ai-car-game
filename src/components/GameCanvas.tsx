@@ -449,8 +449,41 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   }, [physicsService, trackHelper]);
 
   return (
-    <div ref={containerRef} id="canvas-container" className="relative w-full h-full overflow-hidden bg-sky-100">
-      <canvas ref={canvasRef} className="block w-full h-full" />
+    <div 
+      ref={containerRef} 
+      id="canvas-container" 
+      className="m-0 p-0 rounded-none max-w-none border-none outline-none overflow-hidden"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        width: '100vw',
+        height: '100dvh',
+        zIndex: 0,
+        margin: 0,
+        padding: 0,
+        borderRadius: 0,
+        maxWidth: 'none',
+        outline: 'none',
+        border: 'none',
+      }}
+    >
+      <canvas 
+        ref={canvasRef} 
+        className="block"
+        style={{
+          position: "fixed",
+          inset: 0,
+          width: "100vw",
+          height: "100dvh",
+          display: "block",
+          margin: 0,
+          padding: 0,
+          borderRadius: 0,
+          maxWidth: "none",
+          outline: 'none',
+          border: 'none',
+        }}
+      />
       
       {/* Cinematic Sunset Lens flares */}
       <div ref={flareRef} className="pointer-events-none absolute inset-0 z-10 transition-opacity duration-300 opacity-0">

@@ -470,10 +470,84 @@ export const HUD: React.FC<HUDProps> = ({
   };
 
   return (
-    <div id="game-hud" className="absolute inset-0 z-10 flex flex-col justify-between p-4 pb-6 pointer-events-none select-none font-sans">
+    <div
+      id="game-hud"
+      className="absolute inset-0 z-10 flex flex-col justify-between p-3 pb-4 md:p-4 md:pb-6 pointer-events-none select-none font-sans"
+      style={{
+        paddingTop: 'calc(env(safe-area-inset-top) + 12px)',
+        paddingBottom: 'calc(env(safe-area-inset-bottom) + 16px)',
+        paddingLeft: 'calc(env(safe-area-inset-left) + 12px)',
+        paddingRight: 'calc(env(safe-area-inset-right) + 12px)',
+      }}
+    >
       
-      {/* ================= TOP ROW ================= */}
-      <div className="flex items-start justify-between w-full">
+      {/* ================= MOBILE CORNER HUD OVERLAY (md:hidden) ================= */}
+      <div className="md:hidden absolute inset-0 pointer-events-none p-3">
+        {/* Top Left: Position & Lap */}
+        <div
+          style={{
+            position: 'absolute',
+            top: 'calc(env(safe-area-inset-top) + 12px)',
+            left: 'calc(env(safe-area-inset-left) + 12px)',
+          }}
+          className="bg-slate-950/80 backdrop-blur-md border border-slate-800/60 p-2.5 px-3.5 rounded-xl pointer-events-auto flex items-center space-x-2.5 shadow-xl select-none"
+        >
+          <div className="flex items-baseline space-x-0.5">
+            <span className="text-sm font-black text-white">{player.racePosition}</span>
+            <span className="text-[8px] text-slate-400 font-extrabold uppercase">{positionSuffix(player.racePosition)}</span>
+          </div>
+          <div className="w-[1px] h-3.5 bg-slate-800" />
+          <span className="text-[10px] font-black tracking-wider text-sky-400 uppercase">LAP {player.currentLap}/3</span>
+        </div>
+
+        {/* Top Right: Speed */}
+        <div
+          style={{
+            position: 'absolute',
+            top: 'calc(env(safe-area-inset-top) + 12px)',
+            right: 'calc(env(safe-area-inset-right) + 12px)',
+          }}
+          className="bg-slate-950/80 backdrop-blur-md border border-slate-800/60 p-2.5 px-3.5 rounded-xl pointer-events-auto flex items-baseline space-x-1 shadow-xl font-mono select-none"
+        >
+          <span className="text-sm font-bold text-white">{speedKmh}</span>
+          <span className="text-[8px] font-black text-sky-400 tracking-wider font-sans uppercase">KM/H</span>
+        </div>
+
+        {/* Bottom Left: Nitro */}
+        <div
+          style={{
+            position: 'absolute',
+            bottom: 'calc(env(safe-area-inset-bottom) + 112px)',
+            left: 'calc(env(safe-area-inset-left) + 12px)',
+          }}
+          className="bg-slate-950/80 backdrop-blur-md border border-slate-800/60 p-2 px-3 rounded-xl pointer-events-auto flex items-center space-x-2 shadow-xl select-none"
+        >
+          <Zap className="w-3.5 h-3.5 text-cyan-400 fill-cyan-400 animate-pulse" />
+          <span className="text-[9px] font-black text-cyan-400 uppercase tracking-widest font-mono">NITRO {Math.floor(player.nitroCharged)}%</span>
+        </div>
+
+        {/* Bottom Right: Camera / View Toggle */}
+        <div
+          style={{
+            position: 'absolute',
+            bottom: 'calc(env(safe-area-inset-bottom) + 130px)',
+            right: 'calc(env(safe-area-inset-right) + 12px)',
+          }}
+          className="bg-slate-950/80 backdrop-blur-md border border-slate-800/60 p-2.5 rounded-xl pointer-events-auto shadow-xl select-none"
+        >
+          <button
+            onClick={() => triggerNotification('Graphics Mode: Optimized Ultra [60 FPS]')}
+            className="flex items-center space-x-1.5 text-white active:scale-95 transition"
+          >
+            <Eye className="w-4 h-4 text-sky-300" />
+            <span className="text-[9px] font-black tracking-widest uppercase text-slate-300">CAM</span>
+          </button>
+        </div>
+      </div>
+
+
+      {/* ================= DESKTOP TELEMETRY ROW (md:flex / hidden on mobile) ================= */}
+      <div className="hidden md:flex items-start justify-between w-full">
         
         {/* --- TOP LEFT: Race Standings, Lap Timer & Engine/Fuel Health telemetry --- */}
         <div className="flex flex-col space-y-2 pointer-events-auto">
@@ -604,15 +678,16 @@ export const HUD: React.FC<HUDProps> = ({
 
       {/* ================= MIDDLE NOTIFICATION ROW ================= */}
       <div className="flex justify-center my-auto pointer-events-none">
-        {/* Empty or auxiliary messages space */}
+        {/* Helper notifications for non-desktop */}
+        {notif && mdHiddenNotif()}
       </div>
 
       {/* ================= BOTTOM ROW: LANDSCAPE SYMMETRY PLATFORM ================= */}
-      <div className="flex justify-between items-end w-full select-none pointer-events-none mt-auto mb-4 px-6">
+      <div className="flex justify-between items-end w-full select-none pointer-events-none mt-auto mb-2 md:mb-4 px-2 md:px-6">
         
         {/* --- LEFT SIDE: COMPACT TRANSLUCENT RACING ARROW CONTROLS --- */}
-        <div className="flex items-end pointer-events-auto shrink-0 select-none">
-          <div className="flex gap-[28px] items-center">
+        <div className="flex items-end pointer-events-auto shrink-0 select-none scale-75 origin-bottom-left md:scale-100">
+          <div className="flex gap-4 md:gap-[28px] items-center">
             {/* Left Steer Arrow Button */}
             <button
               ref={btnLeftRef}
@@ -623,8 +698,8 @@ export const HUD: React.FC<HUDProps> = ({
                 WebkitUserSelect: 'none',
                 WebkitTapHighlightColor: 'transparent',
                 pointerEvents: 'auto',
-                width: '120px',
-                height: '120px'
+                width: '100px',
+                height: '100px'
               }}
               className={`rounded-full flex flex-col items-center justify-center transition-all bg-slate-950/40 backdrop-blur-md border-2 ${
                 leftPressed
@@ -632,8 +707,8 @@ export const HUD: React.FC<HUDProps> = ({
                   : 'border-sky-500/15 hover:border-sky-400/30 text-sky-400 shadow-[0_4px_12px_rgba(0,0,0,0.5)] bg-slate-950/20'
               }`}
             >
-              <ChevronLeft className="w-12 h-12 pointer-events-none" />
-              <span className="text-[9px] font-black tracking-wider uppercase pointer-events-none -mt-1">STEER L</span>
+              <ChevronLeft className="w-10 h-10 pointer-events-none" />
+              <span className="text-[8px] font-black tracking-wider uppercase pointer-events-none -mt-1">STEER L</span>
             </button>
 
             {/* Right Steer Arrow Button */}
@@ -646,8 +721,8 @@ export const HUD: React.FC<HUDProps> = ({
                 WebkitUserSelect: 'none',
                 WebkitTapHighlightColor: 'transparent',
                 pointerEvents: 'auto',
-                width: '120px',
-                height: '120px'
+                width: '100px',
+                height: '100px'
               }}
               className={`rounded-full flex flex-col items-center justify-center transition-all bg-slate-950/40 backdrop-blur-md border-2 ${
                 rightPressed
@@ -655,14 +730,14 @@ export const HUD: React.FC<HUDProps> = ({
                   : 'border-sky-500/15 hover:border-sky-400/30 text-sky-400 shadow-[0_4px_12px_rgba(0,0,0,0.5)] bg-slate-950/20'
               }`}
             >
-              <ChevronRight className="w-12 h-12 pointer-events-none" />
-              <span className="text-[9px] font-black tracking-wider uppercase pointer-events-none -mt-1">STEER R</span>
+              <ChevronRight className="w-10 h-10 pointer-events-none" />
+              <span className="text-[8px] font-black tracking-wider uppercase pointer-events-none -mt-1">STEER R</span>
             </button>
           </div>
         </div>
 
         {/* --- CENTER BOTTOM: BLUE GLASS SPEEDOMETER & GEAR TELEMETRY --- */}
-        <div className="flex flex-col items-center space-y-2 mx-auto justify-end pointer-events-auto">
+        <div className="hidden md:flex flex-col items-center space-y-2 mx-auto justify-end pointer-events-auto">
           {/* Glassmorphic digital race panel */}
           <div className="bg-slate-950/50 border-2 border-sky-500/20 backdrop-blur-xl p-4 px-6 rounded-3xl flex flex-col items-center shadow-[0_8px_32px_rgba(0,0,0,0.7),0_0_15px_rgba(56,189,248,0.15)] min-w-[200px]">
             {/* Gear display & speed */}
@@ -704,10 +779,10 @@ export const HUD: React.FC<HUDProps> = ({
         </div>
 
         {/* --- RIGHT SIDE: COMPACT VERTICAL RACING CLUSTER CONTROLS --- */}
-        <div className="flex flex-col items-end space-y-4 pointer-events-auto shrink-0 select-none mb-1 mr-4">
+        <div className="flex flex-col items-end space-y-2 pointer-events-auto shrink-0 select-none scale-75 origin-bottom-right md:scale-100">
           
           {/* NITRO & DRIFT Stack Row */}
-          <div className="flex space-x-4 items-center">
+          <div className="flex space-x-3 items-center mb-1">
             {/* Drift Button */}
             <button
               id="btnDrift"
@@ -719,14 +794,14 @@ export const HUD: React.FC<HUDProps> = ({
                 WebkitTapHighlightColor: 'transparent',
                 pointerEvents: 'auto'
               }}
-              className={`w-16 h-16 rounded-full flex flex-col items-center justify-center transition-all bg-slate-950/45 backdrop-blur-sm border border-slate-800/40 text-orange-400 hover:text-orange-300 shadow-[0_4px_12px_rgba(0,0,0,0.5)] ${
+              className={`w-14 h-14 rounded-full flex flex-col items-center justify-center transition-all bg-slate-950/45 backdrop-blur-sm border border-slate-800/40 text-orange-400 hover:text-orange-300 shadow-[0_4px_12px_rgba(0,0,0,0.5)] ${
                 driftPressed
                   ? 'bg-orange-500 border border-orange-300 ring-4 ring-orange-500/30 text-white scale-95 shadow-[0_0_15px_rgba(249,115,22,0.6)]'
                   : 'active:bg-slate-900/60 bg-slate-950/20'
               }`}
             >
-              <Flame className="w-7 h-7 text-orange-400 pointer-events-none animate-pulse" />
-              <span className="text-[7.5px] font-black tracking-widest uppercase pointer-events-none mt-0.5">DRIFT</span>
+              <Flame className="w-6 h-6 text-orange-400 pointer-events-none animate-pulse" />
+              <span className="text-[7px] font-black tracking-widest uppercase pointer-events-none mt-0.5">DRIFT</span>
             </button>
 
             {/* Nitro Button */}
@@ -741,7 +816,7 @@ export const HUD: React.FC<HUDProps> = ({
                 WebkitTapHighlightColor: 'transparent',
                 pointerEvents: 'auto'
               }}
-              className={`w-16 h-16 rounded-full flex flex-col items-center justify-center transition-all shadow-[0_4px_12px_rgba(0,0,0,0.5)] ${
+              className={`w-14 h-14 rounded-full flex flex-col items-center justify-center transition-all shadow-[0_4px_12px_rgba(0,0,0,0.5)] ${
                 player.nitroCharged < 20
                   ? 'bg-slate-950/15 border border-slate-850 opacity-25 cursor-not-allowed text-slate-500'
                   : controls.nitro
@@ -749,13 +824,13 @@ export const HUD: React.FC<HUDProps> = ({
                     : 'bg-cyan-950/45 border border-cyan-900/40 text-cyan-400 hover:text-cyan-300 animate-pulse bg-slate-950/20'
               }`}
             >
-              <Zap className="w-7 h-7 fill-current pointer-events-none" />
-              <span className="text-[7.5px] font-black tracking-widest uppercase pointer-events-none mt-0.5">{Math.floor(player.nitroCharged)}%</span>
+              <Zap className="w-6 h-6 fill-current pointer-events-none" />
+              <span className="text-[7px] font-black tracking-widest uppercase pointer-events-none mt-0.5">{Math.floor(player.nitroCharged)}%</span>
             </button>
           </div>
 
           {/* Pedals Pedal Cluster (Brake on Left, Gas on Right) */}
-          <div className="flex space-x-4 items-end">
+          <div className="flex space-x-3 items-end">
             {/* Brake Pedal Button */}
             <button
               id="btnBrake"
@@ -767,16 +842,16 @@ export const HUD: React.FC<HUDProps> = ({
                 WebkitTapHighlightColor: 'transparent',
                 pointerEvents: 'auto'
               }}
-              className={`w-20 h-28 rounded-2xl flex flex-col items-center justify-between py-4 transition-all bg-slate-950/30 backdrop-blur-sm border-2 ${
+              className={`w-16 h-24 rounded-2xl flex flex-col items-center justify-between py-3 transition-all bg-slate-950/30 backdrop-blur-sm border-2 ${
                 brakePressed
                   ? 'bg-rose-600 border-rose-450 ring-4 ring-rose-500/30 text-white scale-95 shadow-[0_0_15px_rgba(225,29,72,0.6)]'
                   : 'border-rose-950/45 text-rose-450 hover:text-rose-400 hover:border-rose-300 shadow-[0_4px_12px_rgba(0,0,0,0.5)] bg-slate-950/20'
               }`}
             >
-              <div className="w-10 h-1 bg-rose-500/30 rounded-full" />
-              <span className="text-[10px] font-black tracking-widest uppercase pointer-events-none">BRAKE</span>
-              <div className="w-12 h-6 border-t border-rose-500/25 flex items-center justify-center">
-                <ChevronLeft className="w-5 h-5 -rotate-90 pointer-events-none text-rose-500" />
+              <div className="w-8 h-1 bg-rose-500/30 rounded-full" />
+              <span className="text-[9px] font-black tracking-widest uppercase pointer-events-none">BRAKE</span>
+              <div className="w-10 h-5 border-t border-rose-500/25 flex items-center justify-center">
+                <ChevronLeft className="w-4 h-4 -rotate-90 pointer-events-none text-rose-500" />
               </div>
             </button>
 
@@ -791,16 +866,16 @@ export const HUD: React.FC<HUDProps> = ({
                 WebkitTapHighlightColor: 'transparent',
                 pointerEvents: 'auto'
               }}
-              className={`w-20 h-32 rounded-2xl flex flex-col items-center justify-between py-5 transition-all bg-slate-950/30 backdrop-blur-sm border-2 ${
+              className={`w-16 h-28 rounded-2xl flex flex-col items-center justify-between py-4 transition-all bg-slate-950/30 backdrop-blur-sm border-2 ${
                 gasPressed
                   ? 'bg-emerald-600 border-emerald-450 ring-4 ring-emerald-500/30 text-white scale-95 shadow-[0_0_20px_rgba(16,185,129,0.7)]'
                   : 'border-emerald-950/45 text-emerald-450 hover:text-emerald-400 hover:border-emerald-300 shadow-[0_4px_16px_rgba(0,0,0,0.6)]'
               }`}
             >
-              <div className="w-12 h-1 bg-emerald-500/30 rounded-full animate-pulse" />
-              <span className="text-[10px] font-black tracking-widest uppercase pointer-events-none">GAS</span>
-              <div className="w-12 h-6 border-t border-emerald-500/25 flex items-center justify-center">
-                <ChevronLeft className="w-6 h-6 rotate-90 pointer-events-none text-emerald-500" />
+              <div className="w-10 h-1 bg-emerald-500/30 rounded-full animate-pulse" />
+              <span className="text-[9px] font-black tracking-widest uppercase pointer-events-none">GAS</span>
+              <div className="w-10 h-5 border-t border-emerald-500/25 flex items-center justify-center">
+                <ChevronLeft className="w-5 h-5 rotate-90 pointer-events-none text-emerald-500" />
               </div>
             </button>
           </div>
@@ -812,3 +887,12 @@ export const HUD: React.FC<HUDProps> = ({
     </div>
   );
 };
+
+// Helper renderer for mobile notifications
+function mdHiddenNotif() {
+  return (
+    <div className="md:hidden mt-24 bg-sky-550 backdrop-blur-md px-4 py-1 rounded-full border border-sky-400 text-white text-[8.5px] font-black tracking-widest uppercase shadow pointer-events-none select-none">
+      TELEMETRY FEED OK
+    </div>
+  );
+}

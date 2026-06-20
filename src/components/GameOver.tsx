@@ -123,10 +123,17 @@ export const GameOver: React.FC<GameOverProps> = ({
                     <span className={`text-xs ${isPlayer ? 'font-black text-white' : 'font-medium text-slate-300'}`}>
                       {car.name} {isPlayer && '(You)'}
                     </span>
+                    <span className="text-[8px] font-bold px-1.5 py-0.5 rounded uppercase font-mono tracking-wider bg-slate-900 border border-slate-800 text-slate-400">
+                      {isPlayer || car.id.startsWith('remote_') ? 'HUMAN' : 'AI'}
+                    </span>
                   </div>
 
-                  <span className="text-[10px] uppercase font-black text-slate-400 tracking-wider">
-                    {index === 0 ? '🏁 Champion' : `+${(index * 2.1).toFixed(1)}s`}
+                  <span className="text-[10px] font-mono text-cyan-400 font-bold tracking-wider">
+                    {formatTime(
+                      car.id === 'player'
+                        ? elapsedTime
+                        : Math.max(elapsedTime + (car.racePosition - player.racePosition) * 1.84, 15.2 * car.racePosition)
+                    )}
                   </span>
                 </div>
               );
