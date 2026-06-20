@@ -19,7 +19,8 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) =>
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
 
-  const isGarageOrRoomUI = location.pathname === '/garage' || location.pathname === '/rooms' || location.pathname.startsWith('/room/');
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 1024;
+  const isGarageOrRoomUI = isMobile || location.pathname === '/garage' || location.pathname === '/rooms' || location.pathname.startsWith('/room/');
 
   if (isGarageOrRoomUI) {
     return (

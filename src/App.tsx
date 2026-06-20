@@ -13,6 +13,7 @@ import { HUD } from './components/HUD';
 import { Menu } from './components/Menu';
 import { GameOver } from './components/GameOver';
 import { SplashScreen } from './components/SplashScreen';
+import { OrientationForceLandscape } from './components/OrientationGuard';
 import { Trophy, Compass, Sparkles, Volume2, VolumeX, AlertCircle, Sun, Cloud, CloudRain, CloudFog, Moon } from 'lucide-react';
 import { selectRandomPlayerCar, setPlayerSelectedModelKey } from './world/procedural';
 
@@ -86,23 +87,6 @@ function AppBody() {
 
   // Sound preference state
   const [soundEnabled, setSoundEnabled] = useState(true);
-
-  // Screen orientation state
-  const [isPortrait, setIsPortrait] = useState(false);
-
-  // Monitor screen orientation
-  useEffect(() => {
-    const checkOrientation = () => {
-      setIsPortrait(window.innerWidth < window.innerHeight);
-    };
-    checkOrientation();
-    window.addEventListener('resize', checkOrientation);
-    window.addEventListener('orientationchange', checkOrientation);
-    return () => {
-      window.removeEventListener('resize', checkOrientation);
-      window.removeEventListener('orientationchange', checkOrientation);
-    };
-  }, []);
 
   // Instantiated engines
   const trackHelperRef = useRef<TrackGeometryHelper | null>(null);
@@ -519,34 +503,6 @@ function AppBody() {
           maxWidth: 'none',
         }}
       >
-        {/* Landscape orientation warning */}
-        {isPortrait && (
-          <div 
-            id="portrait-orientation-overlay" 
-            className="flex flex-col items-center justify-center bg-black text-white p-6 text-center select-none m-0 rounded-none border-none outline-none"
-            style={{
-              position: "fixed",
-              inset: 0,
-              width: "100vw",
-              height: "100dvh",
-              zIndex: 9999,
-              background: "black"
-            }}
-          >
-            <div className="animate-pulse mb-4 text-sky-400">
-              <svg className="w-12 h-12 mx-auto rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 1.5H8.25A2.25 2.25 0 006 3.75v16.5a2.25 2.25 0 002.25 2.25h7.5A2.25 2.25 0 0018 20.25V3.75a2.25 2.25 0 00-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 3h3M6 20.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zm12 0a.75.75 0 11-1.5 0 .75.75 0 011.5 0z" />
-              </svg>
-            </div>
-            <h2 className="text-2xl font-black uppercase tracking-widest text-sky-400 mb-2 font-sans">
-              LANDSCAPE MODE REQUIRED
-            </h2>
-            <p className="text-xs font-bold text-slate-400 tracking-wider uppercase max-w-xs font-mono">
-              Rotate your device for the best racing experience.
-            </p>
-          </div>
-        )}
-
         {/* Info panel */}
         <div className="absolute top-4 left-4 z-20 pointer-events-none flex items-center space-x-2 text-white bg-slate-950/40 backdrop-blur-sm px-3 py-1 rounded-full border border-slate-800/40 opacity-72">
           <Compass className="w-3.5 h-3.5 text-blue-400 rotate-45" />
@@ -699,7 +655,8 @@ function AppBody() {
   }
 
   return (
-    <Routes>
+    <OrientationForceLandscape isAuthenticated={!!profile}>
+      <Routes>
       <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
       
       {/* Admin Protected Pages */}
@@ -844,7 +801,8 @@ function AppBody() {
           <Navigate to="/login" replace />
         )
       } />
-    </Routes>
+      </Routes>
+    </OrientationForceLandscape>
   );
 }
 
