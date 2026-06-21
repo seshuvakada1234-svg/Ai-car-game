@@ -64,9 +64,11 @@ export class RoomManager {
     weather = 'clear'
   ): Promise<string> {
     const hostId = this.getOrCreatePlayerId();
-    const code = await RoomService.createRoom(hostId, hostNickname, '', hostCarId, map);
+    const rawCode = await RoomService.createRoom(hostId, hostNickname, '', hostCarId, map);
+    const code = rawCode.trim().toUpperCase();
 
     // Save local state for browser reconnection & context
+    localStorage.setItem('activeRoomCode', code);
     sessionStorage.setItem('last_room_code', code);
     sessionStorage.setItem('last_player_nickname', hostNickname);
     sessionStorage.setItem('last_car_id', hostCarId);
@@ -90,13 +92,14 @@ export class RoomManager {
     carId: string,
     carColor?: string
   ): Promise<RoomData> {
-    const cleanCode = code.toUpperCase().trim();
+    const cleanCode = code.trim().toUpperCase();
     const playerId = this.getOrCreatePlayerId();
 
     // Check Firebase and perform proper validation
     await RoomService.joinRoom(cleanCode, playerId, nickname, '', carId);
 
     // Save local state for browser reconnection & context
+    localStorage.setItem('activeRoomCode', cleanCode);
     sessionStorage.setItem('last_room_code', cleanCode);
     sessionStorage.setItem('last_player_nickname', nickname);
     sessionStorage.setItem('last_car_id', carId);
@@ -173,8 +176,10 @@ export class RoomManager {
   }
 
   static async closeRoom(code: string): Promise<void> {
+    const cleanCode = code.trim().toUpperCase();
     const playerId = this.getOrCreatePlayerId();
-    await RoomService.leaveRoom(code, playerId);
+    await RoomService.leaveRoom(cleanCode, playerId);
+    localStorage.removeItem('activeRoomCode');
     sessionStorage.removeItem('last_room_code');
     RoomManager.currentRoomCode = null;
   }
@@ -185,20 +190,23 @@ export class RoomManager {
    * Attempts to rebuild the state and automatically reconnect the player on reload
    */
   static async attemptReconnect(): Promise<RoomData | null> {
-    const lastRoom = sessionStorage.getItem('last_room_code');
+    const lastRoom = localStorage.getItem('activeRoomCode') || sessionStorage.getItem('last_room_code');
     const lastNickname = sessionStorage.getItem('last_player_nickname');
     const lastCar = sessionStorage.getItem('last_car_id');
     const lastColor = sessionStorage.getItem('last_car_color') || undefined;
 
     if (!lastRoom || !lastNickname || !lastCar) return null;
 
+    const normalizedCode = lastRoom.trim().toUpperCase();
+
     try {
-      console.log(`Attempting automatic reconnect to Room: ${lastRoom}`);
-      const data = await this.joinRoom(lastRoom, lastNickname, lastCar, lastColor);
+      console.log(`Attempting automatic reconnect to Room: ${normalizedCode}`);
+      const data = await this.joinRoom(normalizedCode, lastNickname, lastCar, lastColor);
       return data;
     } catch (e) {
       console.warn('Reconnection auto-attempt silent discard:', e);
       // Clean stale session records
+      localStorage.removeItem('activeRoomCode');
       sessionStorage.removeItem('last_room_code');
       return null;
     }
@@ -208,7 +216,8 @@ export class RoomManager {
 
   static getCurrentCode(): string | null {
     if (!RoomManager.currentRoomCode) {
-      RoomManager.currentRoomCode = sessionStorage.getItem('last_room_code');
+      const codeFromStorage = localStorage.getItem('activeRoomCode') || sessionStorage.getItem('last_room_code');
+      RoomManager.currentRoomCode = codeFromStorage ? codeFromStorage.trim().toUpperCase() : null;
     }
     return RoomManager.currentRoomCode;
   }

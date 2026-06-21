@@ -57,6 +57,7 @@ export interface CarState {
   aiSpeedFactor: number;
   aiAggression: number;
   stuckTimer: number;
+  lastRecoveryTime?: number;
 }
 
 export interface Checkpoint {

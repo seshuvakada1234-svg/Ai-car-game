@@ -11,7 +11,8 @@ import { Difficulty, GameSettings } from '../types';
 import { 
   Zap, Trophy, HelpCircle, Sparkles, Download, CheckCircle, 
   AlertOctagon, Users, Radio, Key, Coins, Gem, Car, ArrowLeft, 
-  Plus, Paintbrush, Wrench, Play, X, Compass, ChevronRight, Star, Heart, Gauge, ShieldCheck, Gamepad2, Settings
+  Plus, Paintbrush, Wrench, Play, X, Compass, ChevronRight, Star, Heart, Gauge, ShieldCheck, Gamepad2, Settings,
+  LogOut
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { loadSpecificCarModel, gltfModelCache, setPlayerSelectedModelKey } from '../world/procedural';
@@ -117,8 +118,10 @@ const METALLIC_COLORS = [
 ];
 
 export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoom }) => {
-  const { profile } = useAuth();
+  const { profile, logout } = useAuth();
   const navigate = useNavigate();
+
+  const [settingsDropdownOpen, setSettingsDropdownOpen] = useState(false);
 
   // Selected vehicle settings
   const [selectedCar, setSelectedCar] = useState<'lamborghini' | 'ferrari' | 'bugatti' | 'porsche'>('lamborghini');
@@ -666,6 +669,79 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
             <button onClick={() => handleResourceAdd('coin')} className="bg-cyan-500 text-slate-950 font-black p-0.5 text-[8px] rounded transition ml-1 cursor-pointer">
               <Plus className="w-2.5 h-2.5" />
             </button>
+          </div>
+
+          <div className="h-6 w-[1.5px] bg-white/10 shrink-0" />
+
+          {/* User Settings with Logout Dropdown */}
+          <div className="relative pointer-events-auto flex items-center space-x-2">
+            <button
+              id="user-settings-trigger"
+              onClick={() => setSettingsDropdownOpen(!settingsDropdownOpen)}
+              className="p-1.5 bg-black/60 border border-white/10 hover:border-cyan-500/50 rounded-xl hover:bg-white/10 active:scale-90 transition cursor-pointer flex items-center justify-center text-slate-300 hover:text-[#00f2ff]"
+              title="System Settings"
+            >
+              <Settings className="w-4 h-4 animate-[spin_10s_linear_infinite] hover:animate-[spin_2s_linear_infinite]" />
+            </button>
+
+            {/* Direct Logout Button */}
+            <button
+              id="direct-logout-button"
+              onClick={async () => {
+                await logout();
+                navigate('/login');
+              }}
+              className="p-1.5 bg-rose-950/40 border border-rose-500/30 hover:border-rose-500 rounded-xl hover:bg-rose-900/60 active:scale-90 transition cursor-pointer flex items-center justify-center text-rose-300 hover:text-white"
+              title="Sign Out"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+
+            <AnimatePresence>
+              {settingsDropdownOpen && (
+                <>
+                  <div className="fixed inset-0 z-40 cursor-default" onClick={() => setSettingsDropdownOpen(false)} />
+                  <motion.div
+                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                    className="absolute right-0 mt-2 w-56 bg-black/95 backdrop-blur-xl border border-white/15 rounded-xl p-3.5 z-50 shadow-[0_10px_30px_rgba(0,0,0,0.95)] space-y-3"
+                  >
+                    <div className="flex items-center space-x-2.5 pb-2.5 border-b border-white/5 font-sans">
+                      <div className="w-8 h-8 rounded-full overflow-hidden border border-white/15 bg-slate-900 shrink-0">
+                        <img 
+                          src={profile?.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80'} 
+                          alt={profile?.name || 'Racer'} 
+                          className="w-full h-full object-cover"
+                          referrerPolicy="no-referrer"
+                        />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[10px] uppercase font-black tracking-wider text-[#00f2ff] truncate">
+                          {profile?.name || 'Racer'}
+                        </p>
+                        <p className="text-[8px] font-medium text-slate-400 truncate">
+                          {profile?.email || 'No email associated'}
+                        </p>
+                      </div>
+                    </div>
+                    
+                    <button
+                      id="user-logout-btn"
+                      onClick={async () => {
+                        setSettingsDropdownOpen(false);
+                        await logout();
+                        navigate('/login');
+                      }}
+                      className="w-full flex items-center justify-center space-x-2 px-3 py-2 bg-rose-600/20 border border-rose-500/30 hover:bg-rose-600/35 hover:border-rose-500/50 text-rose-300 rounded-lg text-[9px] font-black uppercase tracking-wider transition cursor-pointer font-sans"
+                    >
+                      <LogOut className="w-3.5 h-3.5" />
+                      <span>SIGN OUT DRIVER</span>
+                    </button>
+                  </motion.div>
+                </>
+              )}
+            </AnimatePresence>
           </div>
         </div>
       </div>

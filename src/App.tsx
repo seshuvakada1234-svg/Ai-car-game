@@ -150,7 +150,14 @@ function AppBody() {
       setCountdown(3);
       setCountdownMsg('READY');
 
+      const startTime = Date.now();
       const tickCountdown = () => {
+        if (Date.now() - startTime > 15000) {
+          console.warn('Warming engine limit reached (15 seconds timeout). Instantly starting countdown.');
+          (window as any).playerCarAddedToScene = true;
+          (window as any).shadersCompiled = true;
+        }
+
         if (!(window as any).playerCarAddedToScene || !(window as any).shadersCompiled) {
           console.log('Waiting for player vehicle and shader compile completion...');
           setCountdownMsg('WARMING ENGINE...');

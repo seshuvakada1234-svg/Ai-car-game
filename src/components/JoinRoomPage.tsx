@@ -25,21 +25,39 @@ export const JoinRoomPage: React.FC = () => {
     setLoading(true);
     setError(null);
 
-    try {
-      await NormalRoomService.joinRoom(
-        normalizedCode,
-        profile.uid,
-        profile.name || 'Racer',
-        profile.photoURL || ''
-      );
+    let attempts = 0;
+    const maxAttempts = 3;
+    let success = false;
+    let finalError: any = null;
+
+    while (attempts < maxAttempts && !success) {
+      try {
+        attempts++;
+        console.log(`Join room attempt ${attempts} of ${maxAttempts} for code: ${normalizedCode}`);
+        await NormalRoomService.joinRoom(
+          normalizedCode,
+          profile.uid,
+          profile.name || 'Racer',
+          profile.photoURL || ''
+        );
+        success = true;
+      } catch (err: any) {
+        console.error(`Attempt ${attempts} failed:`, err);
+        finalError = err;
+        if (attempts < maxAttempts) {
+          // brief delay between retries of 500ms
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
+    }
+
+    if (success) {
       // Navigate to Waiting Lobby
       navigate(`/room/${normalizedCode}`);
-    } catch (err: any) {
-      console.error('Failed to join room:', err);
-      setError(err.message || 'Room code not found or lobby list full.');
-    } finally {
-      setLoading(false);
+    } else {
+      setError(finalError?.message || 'Room code not found or lobby list full.');
     }
+    setLoading(false);
   };
 
   return (

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { CarState } from '../types';
+import { assetManager } from '../services/AssetManager';
 
 class GLTFMaterialsPBRSpecularGlossinessExtension {
   public name = 'KHR_materials_pbrSpecularGlossiness';
@@ -601,13 +602,10 @@ export const preloadGLTFAssets = async (): Promise<void> => {
   isPreloadingStarted = true;
   try {
     // 1. Preload Scenery model structures (Cars are loaded on-demand during selected car download)
-    const sceneryLoader = new GLTFLoader();
     const tryLoadPath = async (paths: string[]): Promise<THREE.Group | null> => {
       for (const p of paths) {
         try {
-          const gltf = await new Promise<any>((resolve, reject) => {
-            sceneryLoader.load(p, resolve, undefined, reject);
-          });
+          const gltf = await assetManager.loadGLTF(p);
           return gltf.scene || gltf;
         } catch (e) {
           // ignore

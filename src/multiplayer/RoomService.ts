@@ -66,7 +66,10 @@ export class RoomService {
       await this.deleteExpiredRooms();
 
       // 2. Generate and verify code
-      const roomCode = await RoomCodeGenerator.generateUnique();
+      const rawCode = await RoomCodeGenerator.generateUnique();
+      const roomCode = rawCode.trim().toUpperCase();
+
+      console.log("Creating room:", roomCode);
 
       const hostPlayer: RoomPlayer = {
         uid: hostId,
@@ -82,6 +85,8 @@ export class RoomService {
         isAI: false
       };
 
+      const expiresAtDate = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes from now
+
       const roomData: RoomState = {
         roomCode,
         code: roomCode, // compatibility
@@ -96,6 +101,7 @@ export class RoomService {
         countdown: 30,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
+        expiresAt: expiresAtDate,
         mapType,
         mapId: mapType, // compatibility
         selectedCars: { [hostId]: selectedCar },
@@ -131,16 +137,23 @@ export class RoomService {
     const cleanCode = roomCode.toUpperCase().trim();
     if (!cleanCode) throw new Error('Invalid room code');
 
+    console.log("Joining room:", cleanCode);
+
     const roomRef = doc(db, 'rooms', cleanCode);
 
     try {
       const snap = await getDoc(roomRef);
-      if (!snap.exists()) {
+      const roomExists = snap.exists();
+      console.log("Room exists:", roomExists);
+
+      if (!roomExists) {
         throw new Error('Invalid room code');
       }
 
       const room = snap.data() as RoomState;
-      
+      console.log("Players:", room.players ? room.players.length : 0);
+      console.log("Room status:", room.status || 'waiting');
+
       // Enforce Room validation checks
       RoomValidator.validateRoomToJoin(room);
 

@@ -40,7 +40,7 @@ interface GameCanvasProps {
   weather?: 'sunny' | 'cloudy' | 'foggy' | 'rain';
 }
 
-export const GameCanvas: React.FC<GameCanvasProps> = ({
+const GameCanvasComponent: React.FC<GameCanvasProps> = ({
   cars,
   playerControls,
   physicsService,
@@ -62,8 +62,13 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   const [warmProgress, setWarmProgress] = React.useState(15);
 
   useEffect(() => {
+    const startTime = Date.now();
     let timer = setInterval(() => {
-      if ((window as any).shadersCompiled) {
+      if ((window as any).shadersCompiled || (Date.now() - startTime > 15000)) {
+        if (Date.now() - startTime > 15000) {
+          console.warn("Shader comp/loading state timed out. Forcing ready state.");
+          (window as any).shadersCompiled = true;
+        }
         setWarmProgress(100);
         clearInterval(timer);
         setTimeout(() => {
@@ -71,8 +76,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         }, 850);
       } else {
         setWarmProgress(prev => {
-          if (prev >= 90) return 90;
-          return prev + 15;
+          if (prev >= 95) return 95;
+          return prev + 10;
         });
       }
     }, 200);
@@ -586,3 +591,19 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     </div>
   );
 };
+
+export const GameCanvas = React.memo(
+  GameCanvasComponent,
+  (prevProps, nextProps) => {
+    // Only re-render when structural inputs or core settings change
+    return (
+      prevProps.trackHelper === nextProps.trackHelper &&
+      prevProps.physicsService === nextProps.physicsService &&
+      prevProps.soundEnabled === nextProps.soundEnabled &&
+      prevProps.timeOfDay === nextProps.timeOfDay &&
+      prevProps.weather === nextProps.weather &&
+      prevProps.gameState === nextProps.gameState &&
+      prevProps.isPaused === nextProps.isPaused
+    );
+  }
+);

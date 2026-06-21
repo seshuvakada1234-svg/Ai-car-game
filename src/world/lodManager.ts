@@ -38,6 +38,9 @@ export class LODManager {
     nearDistance = 250,
     farDistance = 480
   ): void {
+    if (this.sectors.some(s => s.name === name || s.group === group)) {
+      return;
+    }
     const detailMeshes: THREE.Object3D[] = [];
     
     // Perform tree walk once at registration to cache target detail nodes

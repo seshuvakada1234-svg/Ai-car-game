@@ -37,26 +37,46 @@ export class RaceLoader {
                       selectedCarId.includes('bugatti') ? 'bugatti_chiron_top_edition' :
                       'lamborghini_aventador';
 
-    const localBlob = await AssetManager.getVerifiedBlob(carMapKey);
-    if (localBlob) {
-      const buffer = await localBlob.arrayBuffer();
-      const loader = new GLTFLoader();
-      const dracoLoader = new DRACOLoader();
-      dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
-      loader.setDRACOLoader(dracoLoader);
+    let localBlob = await AssetManager.getVerifiedBlob(carMapKey);
+    if (!localBlob) {
+      console.log(`RaceLoader: ${carMapKey} not stored locally, attempting to stream from CDN...`);
+      const asset = AssetManager.getAssets().find(a => a.id === carMapKey);
+      if (asset?.url) {
+        try {
+          const res = await fetch(asset.url);
+          if (res.ok) {
+            localBlob = await res.blob();
+            console.log(`RaceLoader: Streamed ${carMapKey} successfully from CDN.`);
+          }
+        } catch (err) {
+          console.warn(`RaceLoader: Failed to stream ${carMapKey} from CDN, fell back to procedural backups:`, err);
+        }
+      }
+    }
 
-      await new Promise<void>((resolve, reject) => {
-        loader.parse(buffer, '', (gltf) => {
-          (gltfModelCache as any)[carMapKey] = gltf.scene;
-          dracoLoader.dispose();
-          resolve();
-        }, (err) => {
-          dracoLoader.dispose();
-          reject(err);
+    if (localBlob) {
+      try {
+        const buffer = await localBlob.arrayBuffer();
+        const loader = new GLTFLoader();
+        const dracoLoader = new DRACOLoader();
+        dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+        loader.setDRACOLoader(dracoLoader);
+
+        await new Promise<void>((resolve, reject) => {
+          loader.parse(buffer, '', (gltf) => {
+            (gltfModelCache as any)[carMapKey] = gltf.scene;
+            dracoLoader.dispose();
+            resolve();
+          }, (err) => {
+            dracoLoader.dispose();
+            reject(err);
+          });
         });
-      });
+      } catch (err) {
+        console.warn(`RaceLoader: Parsed stored model fail for ${carMapKey}, utilizing beautiful procedural backups:`, err);
+      }
     } else {
-      console.warn(`RaceLoader: Car asset not stored locally, utilizing procedural geometry.`);
+      console.warn(`RaceLoader: Car asset not stored locally and stream failed, utilizing procedural geometry.`);
     }
 
     onProgress({ stage: 'Preparing track environment structures...', percent: 65 });

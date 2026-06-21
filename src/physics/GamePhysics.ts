@@ -114,8 +114,8 @@ export class GamePhysicsService {
       const aiOffsetValue = side * 2.5;
 
       const aiSpawnPos = aiPt.clone().addScaledVector(aiNormal, aiOffsetValue);
-      const aiRoadHeightTest = terrainManager.queryRoadHeight(aiSpawnPos);
-      const aiSpawnY = (aiRoadHeightTest !== null ? aiRoadHeightTest : aiPt.y) + wheelRadius;
+      const groundY = terrainManager.queryRoadHeight(aiSpawnPos) ?? terrainManager.getHeight(aiSpawnPos.x, aiSpawnPos.z);
+      const aiSpawnY = groundY + 0.25;
       const aiStartAngle = Math.atan2(aiTangent.x, aiTangent.z);
 
       let speedFactor = 0.88;
@@ -161,6 +161,13 @@ export class GamePhysicsService {
   }
 
   public recoverCarToNearestCheckpoint(car: CarState) {
+    const now = Date.now();
+    const lastRecovery = car.lastRecoveryTime || 0;
+    if (now - lastRecovery < 2000) {
+      return;
+    }
+    car.lastRecoveryTime = now;
+
     const chpts = this.trackHelper.checkpoints;
     const chptIndex = car.currentCheckpointIndex >= 0 && car.currentCheckpointIndex < chpts.length ? car.currentCheckpointIndex : 0;
     const chpt = chpts[chptIndex];

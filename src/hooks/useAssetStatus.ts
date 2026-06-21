@@ -12,6 +12,22 @@ export function useAssetStatus() {
   const [readyMap, setReadyMap] = useState<Record<string, boolean>>({});
 
   const checkStatus = async () => {
+    // Detect installed app (APK / Installed PWA / Standalone mode)
+    const isStandalone = typeof window !== 'undefined' && (
+      window.matchMedia("(display-mode: standalone)").matches ||
+      (window.navigator as any).standalone === true
+    );
+    const isAndroidWebView = typeof navigator !== 'undefined' && navigator.userAgent.includes("wv");
+    const shouldShowAssetInstaller = isStandalone || isAndroidWebView;
+
+    if (!shouldShowAssetInstaller) {
+      // Normal website user: stream from CDN immediately with no download UI
+      setReadyMap({});
+      setAllReady(true);
+      setChecking(false);
+      return;
+    }
+
     setChecking(true);
     await AssetManager.init();
     const assets = AssetManager.getAssets();

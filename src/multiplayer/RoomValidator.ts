@@ -19,36 +19,59 @@ export class RoomValidator {
     }
 
     // Checking 30 minutes room expiration (last active check)
-    let lastActiveTime = Date.now();
-    const timeSource = room.updatedAt || room.createdAt;
+    let isExpired = false;
+    const now = Date.now();
+    
+    if (room.expiresAt) {
+      let expiresTime = 0;
+      if (typeof room.expiresAt.toMillis === 'function') {
+        expiresTime = room.expiresAt.toMillis();
+      } else if (typeof room.expiresAt.toDate === 'function') {
+        expiresTime = room.expiresAt.toDate().getTime();
+      } else if (room.expiresAt.seconds) {
+        expiresTime = room.expiresAt.seconds * 1000;
+      } else {
+        expiresTime = new Date(room.expiresAt).getTime();
+      }
+      if (now > expiresTime) {
+        isExpired = true;
+      }
+    } else {
+      let createdTime = now;
+      const timeSource = room.createdAt || room.updatedAt;
 
-    if (timeSource) {
-      if (typeof timeSource.toMillis === 'function') {
-        lastActiveTime = timeSource.toMillis();
-      } else if (typeof timeSource.toDate === 'function') {
-        lastActiveTime = timeSource.toDate().getTime();
-      } else if (timeSource.seconds) {
-        lastActiveTime = timeSource.seconds * 1000;
-      } else if (typeof timeSource === 'number') {
-        lastActiveTime = timeSource;
-      } else if (timeSource instanceof Date) {
-        lastActiveTime = timeSource.getTime();
+      if (timeSource) {
+        if (typeof timeSource.toMillis === 'function') {
+          createdTime = timeSource.toMillis();
+        } else if (typeof timeSource.toDate === 'function') {
+          createdTime = timeSource.toDate().getTime();
+        } else if (timeSource.seconds) {
+          createdTime = timeSource.seconds * 1000;
+        } else if (typeof timeSource === 'number') {
+          createdTime = timeSource;
+        } else if (timeSource instanceof Date) {
+          createdTime = timeSource.getTime();
+        }
+      }
+      const ageInMinutes = (now - createdTime) / (1000 * 60);
+      if (ageInMinutes > 30) {
+        isExpired = true;
       }
     }
 
-    const ageInMinutes = (Date.now() - lastActiveTime) / (1000 * 60);
-    if (ageInMinutes > 30) {
+    if (isExpired) {
       throw new Error('Room expired');
     }
 
     // Check status
     if (room.status !== 'waiting') {
-      throw new Error('Race already started');
+      throw new Error('Invalid room code');
     }
 
-    // Capacity checking (human count limit standard configuration check)
-    const humanPlayers = room.players.filter(p => !p.isAI);
-    if (humanPlayers.length >= room.maxPlayers) {
+    // Check capacity
+    const playersList = room.players || [];
+    const maxCount = room.maxPlayers || 3;
+    if (playersList.length >= maxCount) {
       throw new Error('Room full');
     }
   }

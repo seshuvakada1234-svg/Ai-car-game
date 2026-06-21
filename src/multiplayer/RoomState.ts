@@ -44,6 +44,7 @@ export interface RoomState {
   countdown: number;
   createdAt: any;
   updatedAt: any;
+  expiresAt: any;
   mapType: string;
   mapId?: string; // alias for compatibility
   difficulty?: 'easy' | 'medium' | 'hard'; // alias for compatibility

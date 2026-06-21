@@ -94,6 +94,10 @@ class ForestSystem {
     return ForestSystem.instance;
   }
 
+  public get initialized(): boolean {
+    return this.isInitialized;
+  }
+
   /**
    * Builds and initializes the forest, placing custom instanced meshes with placeholders initially,
    * then launches background asynchronous preloading of the high-fidelity GLB models.
@@ -1190,6 +1194,11 @@ class ForestSystem {
 export const forestSystem = ForestSystem.getInstance();
 
 export function buildForest(scene: THREE.Scene, trackHelper: TrackGeometryHelper): void {
+  if (forestSystem.initialized) {
+    console.log('Forest already built, skipping buildForest.');
+    return;
+  }
+
   // Initialize the singleton forest system
   forestSystem.init(scene, trackHelper);
 
