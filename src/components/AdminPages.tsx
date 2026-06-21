@@ -7,9 +7,10 @@ import {
 import { 
   Map, Car, Users, BarChart3, Settings, Plus, Trash2, 
   Edit, ArrowLeft, RefreshCw, Layers, ShieldCheck, HelpCircle, 
-  Sparkles, Compass, CheckCircle, Radio
+  Sparkles, Compass, CheckCircle, Radio, LogOut
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { useAuth } from '../contexts/AuthContext';
 
 // Default mock seed data if not present in Firestore
 const DEFAULT_MAPS = [
@@ -28,6 +29,7 @@ const DEFAULT_CARS = [
 // MAIN ADMIN DASHBOARD OVERVIEW
 // ─────────────────────────────────────────────────────────────────────────────
 export const AdminDashboard: React.FC = () => {
+  const { logout } = useAuth();
   const [stats, setStats] = useState({ maps: 0, cars: 0, rooms: 0, users: 0 });
   const [loading, setLoading] = useState(true);
 
@@ -56,17 +58,28 @@ export const AdminDashboard: React.FC = () => {
 
   return (
     <div className="space-y-8">
-      <div>
-        <div className="flex items-center space-x-2 bg-rose-500/10 text-rose-400 font-extrabold uppercase text-[10px] tracking-widest px-3 py-1 rounded-full border border-rose-500/20 w-max mb-3">
-          <ShieldCheck className="w-3.5 h-3.5 text-rose-500" />
-          <span>Security Administration Level 01</span>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-slate-900/20 p-6 rounded-2xl border border-slate-900/60 backdrop-blur-sm">
+        <div>
+          <div className="flex items-center space-x-2 bg-rose-500/10 text-rose-400 font-extrabold uppercase text-[10px] tracking-widest px-3 py-1 rounded-full border border-rose-500/20 w-max mb-3">
+            <ShieldCheck className="w-3.5 h-3.5 text-rose-500" />
+            <span>Security Administration Level 01</span>
+          </div>
+          <h2 className="text-3xl font-black uppercase tracking-tight text-white animate-pulse">
+            Admin Dashboard
+          </h2>
+          <p className="text-slate-400 text-sm mt-1">
+            Complete platform control utilities for Asphalt Champions.
+          </p>
         </div>
-        <h2 className="text-3xl font-black uppercase tracking-tight text-white">
-          Admin Dashboard
-        </h2>
-        <p className="text-slate-400 text-sm mt-1">
-          Complete platform control utilities for Asphalt Champions.
-        </p>
+        <div className="shrink-0">
+          <button
+            onClick={() => logout()}
+            className="flex items-center space-x-2 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white font-black uppercase text-xs tracking-wider px-5 py-3 rounded-xl border border-rose-500/30 transition-all shadow-[0_0_15px_rgba(244,63,94,0.15)] select-none cursor-pointer"
+          >
+            <LogOut className="w-4 h-4 shrink-0 animate-pulse" />
+            <span>Logout Session</span>
+          </button>
+        </div>
       </div>
 
       {/* Stats row */}

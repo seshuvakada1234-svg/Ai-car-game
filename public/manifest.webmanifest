@@ -1,0 +1,23 @@
+{
+  "name": "AI Race Arena",
+  "short_name": "AIRace",
+  "theme_color": "#090d16",
+  "background_color": "#090d16",
+  "display": "standalone",
+  "scope": "/",
+  "start_url": "/",
+  "icons": [
+    {
+      "src": "https://pub-a248afed72844944a7565dc9cbaacbb0.r2.dev/cars/lamborghini_aventador.glb",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "https://pub-a248afed72844944a7565dc9cbaacbb0.r2.dev/cars/lamborghini_aventador.glb",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

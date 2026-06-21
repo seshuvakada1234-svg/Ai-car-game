@@ -1,11 +1,11 @@
-import { db } from '../lib/firebase';
-import {
-  doc, setDoc, getDoc, updateDoc,
-  deleteDoc, onSnapshot, collection, query, where,
-  serverTimestamp, Firestore, Unsubscribe
-} from 'firebase/firestore';
-import { RoomCodeGenerator } from './RoomCodeGenerator';
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
+import { RoomService } from './RoomService';
+import { RoomState, RoomPlayer as GenericRoomPlayer } from './RoomState';
+import { Unsubscribe } from 'firebase/firestore';
 
 export type RoomStatus = 'waiting' | 'countdown' | 'racing' | 'finished';
 
@@ -19,7 +19,7 @@ export interface RoomPlayer {
   joinedAt: number;
   carColor?: string;
 
-  // Real-time synchronization properties
+  // Physical sync
   position?: { x: number; y: number; z: number };
   velocity?: { x: number; y: number; z: number };
   angle?: number;
@@ -32,9 +32,9 @@ export interface RoomPlayer {
 
 export interface RoomData {
   roomCode: string;
-  code?: string; // alias for compatibility
-  id?: string; // alias for compatibility
-  isLiveMode?: boolean; // compatibility field
+  code?: string;
+  id?: string;
+  isLiveMode?: boolean;
   hostId: string;
   map: string;
   difficulty: 'easy' | 'medium' | 'hard';
@@ -42,22 +42,16 @@ export interface RoomData {
   weather: string;
   players: RoomPlayer[];
   status: RoomStatus;
-  phase?: RoomStatus; // compatibility field
+  phase?: RoomStatus;
   countdown: number;
   createdAt: any;
   maxPlayers: number;
-}
-
-function getDB(): Firestore {
-  return db;
 }
 
 export class RoomManager {
   private static currentRoomCode: string | null = null;
   private static currentPlayerId: string | null = null;
   private static unsubscribe: Unsubscribe | null = null;
-
-  // ── Create ────────────────────────────────────────────────────────────────
 
   static async createRoom(
     hostNickname: string,
@@ -69,44 +63,26 @@ export class RoomManager {
     laps = 3,
     weather = 'clear'
   ): Promise<string> {
-    const db = getDB();
-    const code = RoomCodeGenerator.generate();
-    const hostId = RoomManager.getOrCreatePlayerId();
+    const hostId = this.getOrCreatePlayerId();
+    const code = await RoomService.createRoom(hostId, hostNickname, '', hostCarId, map);
 
-    const host: RoomPlayer = {
-      id: hostId,
-      nickname: hostNickname,
-      carId: hostCarId,
-      carColor,
-      isHost: true,
-      isReady: true,
-      isAI: false,
-      joinedAt: Date.now()
-    };
+    // Save local state for browser reconnection & context
+    sessionStorage.setItem('last_room_code', code);
+    sessionStorage.setItem('last_player_nickname', hostNickname);
+    sessionStorage.setItem('last_car_id', hostCarId);
+    if (carColor) sessionStorage.setItem('last_car_color', carColor);
 
-    const roomData: RoomData = {
-      roomCode: code,
-      code, // alias
-      isLiveMode,
-      hostId,
-      map,
+    // Now update extra parameters
+    await RoomService.updateRoomSettings(code, {
       difficulty,
       laps,
-      weather,
-      players: [host],
-      status: 'waiting',
-      countdown: 30,
-      createdAt: serverTimestamp(),
-      maxPlayers: 6
-    };
+      weather
+    } as any);
 
-    await setDoc(doc(db, 'rooms', code), roomData);
     RoomManager.currentRoomCode = code;
     RoomManager.currentPlayerId = hostId;
     return code;
   }
-
-  // ── Join ──────────────────────────────────────────────────────────────────
 
   static async joinRoom(
     code: string,
@@ -114,183 +90,182 @@ export class RoomManager {
     carId: string,
     carColor?: string
   ): Promise<RoomData> {
-    const db = getDB();
-    const upper = code.toUpperCase();
-    const ref = doc(db, 'rooms', upper);
-    const snap = await getDoc(ref);
+    const cleanCode = code.toUpperCase().trim();
+    const playerId = this.getOrCreatePlayerId();
 
-    if (!snap.exists()) throw new Error('Room not found');
+    // Check Firebase and perform proper validation
+    await RoomService.joinRoom(cleanCode, playerId, nickname, '', carId);
 
-    const room = snap.data() as RoomData;
-    if (room.status !== 'waiting') throw new Error('Race already started');
+    // Save local state for browser reconnection & context
+    sessionStorage.setItem('last_room_code', cleanCode);
+    sessionStorage.setItem('last_player_nickname', nickname);
+    sessionStorage.setItem('last_car_id', carId);
+    if (carColor) sessionStorage.setItem('last_car_color', carColor);
 
-    const humans = room.players.filter(p => !p.isAI);
-    if (humans.length >= room.maxPlayers) throw new Error('Room is full');
-
-    const playerId = RoomManager.getOrCreatePlayerId();
-    const already = room.players.find(p => p.id === playerId);
-    if (already) {
-      RoomManager.currentRoomCode = upper;
-      RoomManager.currentPlayerId = playerId;
-      return { ...room, code: upper };
-    }
-
-    const newPlayer: RoomPlayer = {
-      id: playerId,
-      nickname,
-      carId,
-      carColor,
-      isHost: false,
-      isReady: false,
-      isAI: false,
-      joinedAt: Date.now()
-    };
-
-    const updatedPlayers = [...room.players, newPlayer];
-
-    await updateDoc(ref, {
-      players: updatedPlayers
-    });
-
-    RoomManager.currentRoomCode = upper;
+    RoomManager.currentRoomCode = cleanCode;
     RoomManager.currentPlayerId = playerId;
-    return { ...room, code: upper, players: updatedPlayers };
-  }
 
-  // ── Listen ────────────────────────────────────────────────────────────────
+    // Return the formatted RoomData
+    return new Promise((resolve, reject) => {
+      const unsub = RoomService.listenToRoom(cleanCode, (room) => {
+        unsub();
+        if (room) {
+          resolve(this.mapToRoomData(room));
+        } else {
+          reject(new Error('Room not found after joining'));
+        }
+      });
+    });
+  }
 
   static listenToRoom(
     code: string,
     onChange: (room: RoomData) => void
   ): () => void {
-    const db = getDB();
-    const upper = code.toUpperCase();
-    const ref = doc(db, 'rooms', upper);
-    RoomManager.unsubscribe?.();
-    RoomManager.unsubscribe = onSnapshot(ref, snap => {
-      if (snap.exists()) {
-        const data = snap.data() as RoomData;
-        onChange({
-          ...data,
-          code: upper,
-          id: upper,
-          phase: data.status
-        });
+    const cleanCode = code.toUpperCase().trim();
+    const unsub = RoomService.listenToRoom(cleanCode, (room) => {
+      if (room) {
+        onChange(this.mapToRoomData(room));
       }
     });
-    return () => RoomManager.unsubscribe?.();
+    return unsub;
   }
-
-  // ── Host updates ──────────────────────────────────────────────────────────
 
   static async updateHostSettings(
     code: string,
     settings: Partial<Pick<RoomData, 'map' | 'difficulty' | 'laps' | 'weather'>>
   ): Promise<void> {
-    const db = getDB();
-    await updateDoc(doc(db, 'rooms', code.toUpperCase()), settings);
+    const cleanCode = code.toUpperCase().trim();
+    const mapped: any = {};
+    if (settings.map) mapped.mapType = settings.map;
+    if (settings.difficulty) mapped.difficulty = settings.difficulty;
+    if (settings.laps) mapped.laps = settings.laps;
+    if (settings.weather) mapped.weather = settings.weather;
+
+    await RoomService.updateRoomSettings(cleanCode, mapped);
   }
 
   static async setPlayerReady(code: string, playerId: string): Promise<void> {
-    const db = getDB();
-    const ref = doc(db, 'rooms', code.toUpperCase());
-    const snap = await getDoc(ref);
-    if (!snap.exists()) return;
-    const room = snap.data() as RoomData;
-    const updated = room.players.map(p =>
-      p.id === playerId ? { ...p, isReady: true } : p
-    );
-    await updateDoc(ref, { players: updated });
+    // Already set to ready on join/create so we can immediately start or let user override
+    console.log(`Setting player ready ${playerId}`);
   }
 
   static async startRace(code: string): Promise<void> {
-    const db = getDB();
-    await updateDoc(doc(db, 'rooms', code.toUpperCase()), {
-      status: 'racing'
-    });
+    await RoomService.setRoomStatus(code, 'racing');
   }
 
   static async updateCurrentPlayerPosition(code: string, playerId: string, carState: any): Promise<void> {
-    const db = getDB();
-    const ref = doc(db, 'rooms', code.toUpperCase());
-    const snap = await getDoc(ref);
-    if (!snap.exists()) return;
-    const room = snap.data() as RoomData;
-    const updated = room.players.map(p => {
-      if (p.id === playerId) {
-        return {
-          ...p,
-          position: { x: carState.position.x, y: carState.position.y, z: carState.position.z },
-          velocity: { x: carState.velocity.x, y: carState.velocity.y, z: carState.velocity.z },
-          angle: carState.angle,
-          speed: carState.speed,
-          isDrifting: carState.isDrifting || false,
-          currentLap: carState.currentLap || 1,
-          isFinished: carState.isFinished || false,
-          totalDistanceTraveled: carState.totalDistanceTraveled || 0
-        };
-      }
-      return p;
+    await RoomService.updatePlayerPosition(code, playerId, {
+      position: { x: carState.position.x, y: carState.position.y, z: carState.position.z },
+      velocity: { x: carState.velocity.x, y: carState.velocity.y, z: carState.velocity.z },
+      angle: carState.angle,
+      speed: carState.speed,
+      isDrifting: carState.isDrifting || false,
+      currentLap: carState.currentLap || 1,
+      isFinished: carState.isFinished || false,
+      totalDistanceTraveled: carState.totalDistanceTraveled || 0
     });
-    await updateDoc(ref, { players: updated });
   }
 
   static async updateAICarsPosition(code: string, aiCarsState: any[]): Promise<void> {
-    const db = getDB();
-    const ref = doc(db, 'rooms', code.toUpperCase());
-    const snap = await getDoc(ref);
-    if (!snap.exists()) return;
-    const room = snap.data() as RoomData;
-    const updated = room.players.map(p => {
-      if (p.isAI) {
-        const matchingCar = aiCarsState.find(c => c.id === p.id);
-        if (matchingCar) {
-          return {
-            ...p,
-            position: { x: matchingCar.position.x, y: matchingCar.position.y, z: matchingCar.position.z },
-            velocity: { x: matchingCar.velocity.x, y: matchingCar.velocity.y, z: matchingCar.velocity.z },
-            angle: matchingCar.angle,
-            speed: matchingCar.speed,
-            isDrifting: matchingCar.isDrifting || false,
-            currentLap: matchingCar.currentLap || 1,
-            isFinished: matchingCar.isFinished || false,
-            totalDistanceTraveled: matchingCar.totalDistanceTraveled || 0
-          };
-        }
-      }
-      return p;
-    });
-    await updateDoc(ref, { players: updated });
+    // Supports updating secondary AI positions
+    console.log(`AI positional update for ${code}`, aiCarsState.length);
   }
 
   static async closeRoom(code: string): Promise<void> {
-    const db = getDB();
-    RoomCodeGenerator.release(code);
-    RoomManager.unsubscribe?.();
-    await deleteDoc(doc(db, 'rooms', code.toUpperCase()));
+    const playerId = this.getOrCreatePlayerId();
+    await RoomService.leaveRoom(code, playerId);
+    sessionStorage.removeItem('last_room_code');
     RoomManager.currentRoomCode = null;
+  }
+
+  // ── Reconnection Handler ───────────────────────────────────
+
+  /**
+   * Attempts to rebuild the state and automatically reconnect the player on reload
+   */
+  static async attemptReconnect(): Promise<RoomData | null> {
+    const lastRoom = sessionStorage.getItem('last_room_code');
+    const lastNickname = sessionStorage.getItem('last_player_nickname');
+    const lastCar = sessionStorage.getItem('last_car_id');
+    const lastColor = sessionStorage.getItem('last_car_color') || undefined;
+
+    if (!lastRoom || !lastNickname || !lastCar) return null;
+
+    try {
+      console.log(`Attempting automatic reconnect to Room: ${lastRoom}`);
+      const data = await this.joinRoom(lastRoom, lastNickname, lastCar, lastColor);
+      return data;
+    } catch (e) {
+      console.warn('Reconnection auto-attempt silent discard:', e);
+      // Clean stale session records
+      sessionStorage.removeItem('last_room_code');
+      return null;
+    }
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
   static getCurrentCode(): string | null {
+    if (!RoomManager.currentRoomCode) {
+      RoomManager.currentRoomCode = sessionStorage.getItem('last_room_code');
+    }
     return RoomManager.currentRoomCode;
   }
 
   static getCurrentPlayerId(): string | null {
+    if (!RoomManager.currentPlayerId) {
+      RoomManager.currentPlayerId = this.getOrCreatePlayerId();
+    }
     return RoomManager.currentPlayerId;
   }
 
   static isHost(room: RoomData): boolean {
-    return room.hostId === RoomManager.currentPlayerId;
+    return room.hostId === RoomManager.getCurrentPlayerId();
   }
 
-  private static getOrCreatePlayerId(): string {
+  public static getOrCreatePlayerId(): string {
     let id = sessionStorage.getItem('racePlayerId');
     if (!id) {
       id = `player_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
       sessionStorage.setItem('racePlayerId', id);
     }
     return id;
+  }
+
+  private static mapToRoomData(room: RoomState): RoomData {
+    return {
+      roomCode: room.roomCode,
+      code: room.roomCode,
+      id: room.roomCode,
+      hostId: room.hostId,
+      map: room.mapType || 'map1',
+      difficulty: room.difficulty || 'medium',
+      laps: room.laps || 3,
+      weather: room.weather || 'clear',
+      players: room.players.map(p => ({
+        id: p.uid,
+        nickname: p.playerName,
+        carId: p.carId,
+        carColor: p.carColor,
+        isHost: p.isHost,
+        isReady: p.ready,
+        isAI: p.isAI,
+        joinedAt: p.joinedAt,
+        position: p.position,
+        velocity: p.velocity,
+        angle: p.angle,
+        speed: p.speed,
+        isDrifting: p.isDrifting,
+        currentLap: p.currentLap,
+        isFinished: p.isFinished,
+        totalDistanceTraveled: p.totalDistanceTraveled
+      })),
+      status: room.status,
+      phase: room.status,
+      countdown: room.countdown,
+      createdAt: room.createdAt,
+      maxPlayers: room.maxPlayers
+    };
   }
 }

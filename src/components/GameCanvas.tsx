@@ -5,6 +5,8 @@ import { GamePhysicsService } from '../physics/GamePhysics';
 import { TrafficAIService } from '../ai/TrafficAI';
 import { TrackGeometryHelper } from '../utils/track';
 import { preloadGLTFAssets } from '../world/procedural';
+import { ShaderPreloader } from '../services/ShaderPreloader';
+import { ShaderCompileScreen } from './ShaderCompileScreen';
 import { DragonTrackWorld } from '../world/DragonTrackWorld';
 import { CoastalSunsetTrackWorld } from '../world/CoastalSunsetTrackWorld';
 import { lodManager } from '../world/lodManager';
@@ -56,6 +58,28 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   const flareRef = useRef<HTMLDivElement>(null);
   const speedVignetteRef = useRef<HTMLDivElement>(null);
 
+  const [warming, setWarming] = React.useState(true);
+  const [warmProgress, setWarmProgress] = React.useState(15);
+
+  useEffect(() => {
+    let timer = setInterval(() => {
+      if ((window as any).shadersCompiled) {
+        setWarmProgress(100);
+        clearInterval(timer);
+        setTimeout(() => {
+          setWarming(false);
+        }, 850);
+      } else {
+        setWarmProgress(prev => {
+          if (prev >= 90) return 90;
+          return prev + 15;
+        });
+      }
+    }, 200);
+
+    return () => clearInterval(timer);
+  }, []);
+
   const carsRef = useRef<CarState[]>(cars);
   const controlsRef = useRef<ControlsState>(playerControls);
   const gameStateRef = useRef<string>(gameState);
@@ -81,9 +105,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     if (!canvasRef.current || !containerRef.current) return;
 
     let isUnmounted = false;
-
-    // Trigger asset preloading asynchronously
-    preloadGLTFAssets();
 
     // --- 1. INITIALIZE THREE.JS SCENE, CAMERA, RENDERER ---
     const scene = new THREE.Scene();
@@ -150,6 +171,19 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     const cameraController = new CameraController(camera, 62, scene);
     const vehicleRenderer = new VehicleRenderer(scene, reflectionTex);
     const trafficAIService = new TrafficAIService(trackHelper);
+
+    // Warm up WebGL shader context on the fly
+    (window as any).shadersCompiled = false;
+    (async () => {
+      try {
+        await preloadGLTFAssets();
+        await ShaderPreloader.preloadShaders(renderer, scene, camera);
+      } catch (err) {
+        console.warn("Shader warming error, proceeding standard:", err);
+      } finally {
+        (window as any).shadersCompiled = true;
+      }
+    })();
 
     // Spawn trackside street light glow elements (Preallocated geometry & batched color material cache)
     const bulbGeometry = new THREE.SphereGeometry(0.3, 8, 8);
@@ -547,6 +581,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           background: 'radial-gradient(circle, transparent 52%, rgba(240, 10, 10, 0.12) 80%, rgba(0, 0, 0, 0.72) 100%)'
         }}
       />
+
+      {warming && <ShaderCompileScreen progress={warmProgress} />}
     </div>
   );
 };

@@ -1,3 +1,8 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 import { useState, useEffect, useCallback } from 'react';
 import { RoomManager, RoomData } from '../multiplayer/RoomManager';
 import { SyncManager } from '../multiplayer/SyncManager';
@@ -20,7 +25,7 @@ export interface UseRoomReturn {
   setReady: () => Promise<void>;
 }
 
-// Global shared state for useRoom callbacks and variables
+// Global shared state for useRoom callbacks and variables (prevents multiple duplicate listeners on subpages)
 let globalRoom: RoomData | null = null;
 let globalRoomCode: string | null = RoomManager.getCurrentCode();
 let globalLoading = false;
@@ -61,7 +66,7 @@ function unsubscribeFromRoom() {
   SyncManager.detach();
 }
 
-// Initial bootstrap if room code is available
+// Initial bootstrap if room code is available on load
 if (globalRoomCode && !unsubscribeFromSync) {
   subscribeToRoom(globalRoomCode);
 }
@@ -72,10 +77,30 @@ export function useRoom(): UseRoomReturn {
   useEffect(() => {
     const listener = () => forceUpdate({});
     listeners.add(listener);
+
+    // Dynamic Safe Reconnect trigger on mount if disconnected
+    if (!globalRoom && !globalLoading) {
+      const code = RoomManager.getCurrentCode();
+      if (code) {
+        setImmediateReconnect(code);
+      }
+    }
+
     return () => {
       listeners.delete(listener);
     };
   }, []);
+
+  const setImmediateReconnect = async (code: string) => {
+    try {
+      const room = await RoomManager.attemptReconnect();
+      if (room) {
+        subscribeToRoom(room.roomCode);
+      }
+    } catch (e: any) {
+      console.warn('Silent mount-period reconnection abort:', e);
+    }
+  };
 
   const createRoom = useCallback(async (
     nickname: string, carId: string, carColor?: string, isLiveMode = false,
@@ -99,7 +124,7 @@ export function useRoom(): UseRoomReturn {
   ): Promise<void> => {
     updateGlobalState(globalRoom, globalRoomCode, true, null);
     try {
-      const joined = await RoomManager.joinRoom(code, nickname, carId, carColor);
+      await RoomManager.joinRoom(code, nickname, carId, carColor);
       subscribeToRoom(code.toUpperCase());
     } catch (e: any) {
       updateGlobalState(globalRoom, globalRoomCode, false, e.message);

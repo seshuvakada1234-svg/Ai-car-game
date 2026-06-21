@@ -1,18 +1,16 @@
-import { db } from '../lib/firebase';
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { db, auth } from '../lib/firebase';
 import {
-  doc,
-  setDoc,
-  getDoc,
-  updateDoc,
-  deleteDoc,
-  runTransaction,
-  collection,
-  onSnapshot,
-  getDocs,
-  serverTimestamp,
-  increment
+  doc, updateDoc, deleteDoc, collection,
+  onSnapshot, getDocs, setDoc, getDoc,
+  serverTimestamp
 } from 'firebase/firestore';
-import { RoomCodeGenerator } from './RoomCodeGenerator';
+import { RoomService } from './RoomService';
+import { RoomPlayer, RoomState } from './RoomState';
 
 export interface NormalPlayer {
   uid: string;
@@ -20,6 +18,18 @@ export interface NormalPlayer {
   photoURL: string;
   joinedAt: number;
   ready: boolean;
+  carId?: string;
+  carColor?: string;
+
+  // Track metrics
+  position?: { x: number; y: number; z: number };
+  velocity?: { x: number; y: number; z: number };
+  angle?: number;
+  speed?: number;
+  isDrifting?: boolean;
+  currentLap?: number;
+  isFinished?: boolean;
+  totalDistanceTraveled?: number;
 }
 
 export interface NormalRoom {
@@ -31,13 +41,13 @@ export interface NormalRoom {
   status: 'waiting' | 'countdown' | 'racing' | 'finished';
   maxPlayers: number;
   currentPlayers: number;
-  players: string[]; // List of player UIDs as requested in Firestore Structure definition 1
+  players: string[];
   createdAt: any;
 }
 
 export class NormalRoomService {
   /**
-   * Generates a unique room code and creates a new room in Firestore rooms/ collection.
+   * Generates a completely unique, secure room code and registers the room doc
    */
   static async createRoom(
     ownerUid: string,
@@ -46,41 +56,11 @@ export class NormalRoomService {
     selectedCar: string,
     mapId: string
   ): Promise<string> {
-    const code = RoomCodeGenerator.generate().toUpperCase();
-
-    const roomData: NormalRoom = {
-      roomCode: code,
-      ownerUid,
-      ownerName,
-      selectedCar,
-      mapId,
-      status: 'waiting',
-      maxPlayers: 3,
-      currentPlayers: 1,
-      players: [ownerUid],
-      createdAt: serverTimestamp()
-    };
-
-    const playerObj: NormalPlayer = {
-      uid: ownerUid,
-      playerName: ownerName,
-      photoURL: ownerPhotoURL || '',
-      joinedAt: Date.now(),
-      ready: true
-    };
-
-    // Use a transaction/batch to ensure atomicity
-    const roomRef = doc(db, 'rooms', code);
-    const playerRef = doc(db, 'rooms', code, 'players', ownerUid);
-
-    await setDoc(roomRef, roomData);
-    await setDoc(playerRef, playerObj);
-
-    return code;
+    return RoomService.createRoom(ownerUid, ownerName, ownerPhotoURL, selectedCar, mapId);
   }
 
   /**
-   * Joins an existing room by checking constraints and updating the currentPlayers count and subcollection.
+   * Performs critical safety validations before allowing a user to join this match
    */
   static async joinRoom(
     code: string,
@@ -88,133 +68,66 @@ export class NormalRoomService {
     playerName: string,
     photoURL: string
   ): Promise<void> {
-    const upperCode = code.toUpperCase().trim();
-    const roomRef = doc(db, 'rooms', upperCode);
-
-    await runTransaction(db, async (transaction) => {
-      const roomSnap = await transaction.get(roomRef);
-      if (!roomSnap.exists()) {
-        throw new Error('Room ' + upperCode + ' does not exist.');
-      }
-
-      const roomData = roomSnap.data() as NormalRoom;
-
-      if (roomData.status !== 'waiting') {
-        throw new Error('This race has already started or finished.');
-      }
-
-      // Check if player is already inside the room
-      const playerList = roomData.players || [];
-      const isAlreadyIn = playerList.includes(uid);
-
-      if (!isAlreadyIn) {
-        if (roomData.currentPlayers >= 3) {
-          throw new Error('Room is full (Maximum 3 players).');
-        }
-
-        const updatedPlayers = [...playerList, uid];
-        transaction.update(roomRef, {
-          currentPlayers: increment(1),
-          players: updatedPlayers
-        });
-      }
-
-      // Add/overwrite player document inside subcollection
-      const playerRef = doc(db, 'rooms', upperCode, 'players', uid);
-      const playerObj: NormalPlayer = {
-        uid,
-        playerName,
-        photoURL: photoURL || '',
-        joinedAt: Date.now(),
-        ready: true
-      };
-
-      transaction.set(playerRef, playerObj);
-    });
+    // Read the room selection default car first
+    const cleanCode = code.toUpperCase().trim();
+    const roomRef = doc(db, 'rooms', cleanCode);
+    const snap = await getDoc(roomRef);
+    let car = 'porsche_911_gt3';
+    if (snap.exists()) {
+      car = (snap.data() as RoomState).selectedCar || car;
+    }
+    await RoomService.joinRoom(cleanCode, uid, playerName, photoURL || '', car);
   }
 
   /**
-   * Updates host room settings (map & car selection). Only ownerUid can change these.
+   * Updates host room configurations
    */
   static async updateRoomSettings(
     code: string,
     ownerUid: string,
     updates: Partial<Pick<NormalRoom, 'mapId' | 'selectedCar'>>
   ): Promise<void> {
-    const upperCode = code.toUpperCase().trim();
-    const roomRef = doc(db, 'rooms', upperCode);
-    const roomSnap = await getDoc(roomRef);
-
-    if (!roomSnap.exists()) {
-      throw new Error('Room not found');
-    }
-
-    const roomData = roomSnap.data() as NormalRoom;
-    if (roomData.ownerUid !== ownerUid) {
-      throw new Error('Only the room owner can modify settings.');
-    }
-
-    await updateDoc(roomRef, updates);
+    await RoomService.updateRoomSettings(code, updates);
   }
 
   /**
-   * Start countdown of the race (triggered automatically or by owner)
+   * Triggers room status transition (waiting -> countdown -> racing)
    */
   static async setRoomStatus(
     code: string,
     status: NormalRoom['status']
   ): Promise<void> {
-    const upperCode = code.toUpperCase().trim();
-    const roomRef = doc(db, 'rooms', upperCode);
-    await updateDoc(roomRef, { status });
+    await RoomService.setRoomStatus(code, status);
   }
 
   /**
-   * Leaves a room. If ownerUid leaves, we cancel (delete) the room.
+   * Leaves or disbands room cleanly
    */
   static async leaveOrCancelRoom(code: string, uid: string): Promise<void> {
-    const upperCode = code.toUpperCase().trim();
-    const roomRef = doc(db, 'rooms', upperCode);
-    const roomSnap = await getDoc(roomRef);
-
-    if (!roomSnap.exists()) return;
-
-    const roomData = roomSnap.data() as NormalRoom;
-
-    if (roomData.ownerUid === uid) {
-      // Owner leaves: delete room and its subcollection
-      const playersSubCollRef = collection(db, 'rooms', upperCode, 'players');
-      const playersSnap = await getDocs(playersSubCollRef);
-      for (const pDoc of playersSnap.docs) {
-        await deleteDoc(doc(db, 'rooms', upperCode, 'players', pDoc.id));
-      }
-      await deleteDoc(roomRef);
-    } else {
-      // Normal guest leaves: decrement currentPlayers, remove from players array & delete player doc
-      const playerList = roomData.players || [];
-      const updatedPlayers = playerList.filter((pId) => pId !== uid);
-
-      await updateDoc(roomRef, {
-        currentPlayers: Math.max(1, roomData.currentPlayers - 1),
-        players: updatedPlayers
-      });
-
-      await deleteDoc(doc(db, 'rooms', upperCode, 'players', uid));
-    }
+    await RoomService.leaveRoom(code, uid);
   }
 
   /**
    * Listen to any changes in the main room doc.
    */
   static listenToRoom(code: string, callback: (room: NormalRoom | null) => void) {
-    const upperCode = code.toUpperCase().trim();
-    const roomRef = doc(db, 'rooms', upperCode);
-    return onSnapshot(roomRef, (snap) => {
-      if (snap.exists()) {
-        callback(snap.data() as NormalRoom);
-      } else {
+    return RoomService.listenToRoom(code, (state) => {
+      if (!state) {
         callback(null);
+        return;
       }
+      callback({
+        roomCode: state.roomCode,
+        ownerUid: state.hostId,
+        ownerName: state.ownerName || 'Host',
+        selectedCar: state.selectedCar || 'porsche_911_gt3',
+        mapId: state.mapType,
+        status: state.status,
+        maxPlayers: state.maxPlayers,
+        currentPlayers: state.currentPlayers,
+        players: state.players.map(p => p.uid),
+        createdAt: state.createdAt
+      });
     });
   }
 
@@ -222,21 +135,37 @@ export class NormalRoomService {
    * Listen to changes in the players subcollection.
    */
   static listenToPlayers(code: string, callback: (players: NormalPlayer[]) => void) {
-    const upperCode = code.toUpperCase().trim();
-    const playersRef = collection(db, 'rooms', upperCode, 'players');
+    const cleanCode = code.toUpperCase().trim();
+    const playersRef = collection(db, 'rooms', cleanCode, 'players');
     return onSnapshot(playersRef, (snap) => {
       const list: NormalPlayer[] = [];
       snap.forEach((doc) => {
-        list.push(doc.data() as NormalPlayer);
+        const d = doc.data();
+        list.push({
+          uid: d.uid || doc.id,
+          playerName: d.playerName || d.nickname || 'Driver',
+          photoURL: d.photoURL || '',
+          joinedAt: d.joinedAt || Date.now(),
+          ready: d.ready ?? d.isReady ?? true,
+          carId: d.carId || 'porsche_911_gt3',
+          carColor: d.carColor,
+          position: d.position,
+          velocity: d.velocity,
+          angle: d.angle,
+          speed: d.speed,
+          isDrifting: d.isDrifting,
+          currentLap: d.currentLap,
+          isFinished: d.isFinished,
+          totalDistanceTraveled: d.totalDistanceTraveled
+        });
       });
-      // Sort by joinedAt to keep a consistent order
       list.sort((a, b) => a.joinedAt - b.joinedAt);
       callback(list);
     });
   }
 
   /**
-   * Updates a single player's driving coordinates and race state fields inside the subcollection.
+   * Updates player's real-time physical telemetry
    */
   static async updatePlayerPosition(
     code: string,
@@ -252,8 +181,8 @@ export class NormalRoomService {
       totalDistanceTraveled: number;
     }
   ): Promise<void> {
-    const upperCode = code.toUpperCase().trim();
-    const playerRef = doc(db, 'rooms', upperCode, 'players', uid);
+    const cleanCode = code.toUpperCase().trim();
+    const playerRef = doc(db, 'rooms', cleanCode, 'players', uid);
     await updateDoc(playerRef, coords);
   }
 }

@@ -43,6 +43,11 @@ import { JoinRoomPage } from './components/JoinRoomPage';
 import { WaitingLobbyPage } from './components/WaitingLobbyPage';
 import { UserRacePage } from './components/UserRacePage';
 
+// Performance Offline Asset Stream System Imports
+import { useAssetStatus } from './hooks/useAssetStatus';
+import { AssetInstallScreen } from './components/AssetInstallScreen';
+import { RaceLoadingScreen } from './components/RaceLoadingScreen';
+
 // Firebase Firestore functions to report player score highscores
 import { db } from './lib/firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
@@ -146,9 +151,9 @@ function AppBody() {
       setCountdownMsg('READY');
 
       const tickCountdown = () => {
-        if (!(window as any).playerCarAddedToScene) {
-          console.log('Waiting for player vehicle to be successfully loaded and added to the scene...');
-          setCountdownMsg('READY...');
+        if (!(window as any).playerCarAddedToScene || !(window as any).shadersCompiled) {
+          console.log('Waiting for player vehicle and shader compile completion...');
+          setCountdownMsg('WARMING ENGINE...');
           return;
         }
 
@@ -478,12 +483,35 @@ function AppBody() {
   // THE COMPREHENSIVE RACING VIEW RENDER (FULLSCREEN HUD + canvas mesh)
   // ───────────────────────────────────────────────────────────────────────────
   const RacingCanvasUnit = () => {
+    const { checking, allReady, checkStatus } = useAssetStatus();
+
     useEffect(() => {
       // If we directly hit /race but haven't initialized settings, redirect back
       if (!settings) {
         navigate('/garage');
       }
     }, [settings]);
+
+    if (checking) {
+      return (
+        <div className="fixed inset-0 bg-slate-950 flex flex-col items-center justify-center font-sans text-white z-50">
+          <div className="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full mb-4 animate-spin" />
+          <p className="text-slate-400 font-mono tracking-wider text-xs uppercase animate-pulse">
+            Verifying Live Racing Assets...
+          </p>
+        </div>
+      );
+    }
+
+    if (!allReady) {
+      return (
+        <div className="fixed inset-0 bg-slate-950 z-50">
+          <AssetInstallScreen onComplete={async () => {
+            await checkStatus();
+          }} />
+        </div>
+      );
+    }
 
     return (
       <div 

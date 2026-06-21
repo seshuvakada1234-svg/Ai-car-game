@@ -23,10 +23,12 @@
     <script type="module" src="/src/main.tsx"></script>
     <script>
       if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.getRegistrations().then((registrations) => {
-          for (const registration of registrations) {
-            registration.unregister();
-          }
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').then((reg) => {
+            console.log('AI Race Arena PWA Service Worker registered successfully:', reg.scope);
+          }).catch((err) => {
+            console.warn('AI Race Arena PWA Service Worker registration failed:', err);
+          });
         });
       }
     </script>

@@ -1,0 +1,78 @@
+{
+  "version": "1.0.0",
+  "totalSize": "105.6 MB",
+  "assets": [
+    {
+      "id": "lamborghini_aventador",
+      "name": "Lamborghini Aventador SVJ (8.3 MB)",
+      "version": "1.0.0",
+      "size": 8703180,
+      "url": "https://pub-a248afed72844944a7565dc9cbaacbb0.r2.dev/cars/lamborghini_aventador.glb",
+      "checksum": "sha256-lambosvj9183fake",
+      "category": "cars"
+    },
+    {
+      "id": "ferrari_purosangue",
+      "name": "Ferrari Purosangue Line (6.1 MB)",
+      "version": "1.0.0",
+      "size": 6396000,
+      "url": "https://pub-a248afed72844944a7565dc9cbaacbb0.r2.dev/cars/2023_ferrari_purosangue.glb",
+      "checksum": "sha256-puro2023fake",
+      "category": "cars"
+    },
+    {
+      "id": "bugatti_chiron_top_edition",
+      "name": "Bugatti Chiron Super Sport (9.5 MB)",
+      "version": "1.0.0",
+      "size": 9961472,
+      "url": "https://pub-a248afed72844944a7565dc9cbaacbb0.r2.dev/cars/bugatti_chiron_top_edition.glb",
+      "checksum": "sha256-chironssfake",
+      "category": "cars"
+    },
+    {
+      "id": "porsche_911_gt3",
+      "name": "Porsche 911 GT3 RS Touring (7.2 MB)",
+      "version": "1.0.0",
+      "size": 7549747,
+      "url": "https://pub-a248afed72844944a7565dc9cbaacbb0.r2.dev/cars/porsche_911_gt3.glb",
+      "checksum": "sha256-911gt3rstfake",
+      "category": "cars"
+    },
+    {
+      "id": "dragon_mountain_map",
+      "name": "Dragon Mountain Apex Map (42.1 MB)",
+      "version": "1.0.0",
+      "size": 44145049,
+      "url": "https://pub-a248afed72844944a7565dc9cbaacbb0.r2.dev/assets/maps/dragon_mountain.glb",
+      "checksum": "sha256-dragontrack92",
+      "category": "maps"
+    },
+    {
+      "id": "coastal_sunset_track",
+      "name": "Coastal Sunset Beach Track (15.4 MB)",
+      "version": "1.0.0",
+      "size": 16148070,
+      "url": "https://pub-a248afed72844944a7565dc9cbaacbb0.r2.dev/assets/maps/coastal_sunset.glb",
+      "checksum": "sha256-coastalbeach44",
+      "category": "maps"
+    },
+    {
+      "id": "environmental_textures",
+      "name": "High Dynamic Range Textures (12.0 MB)",
+      "version": "1.0.1",
+      "size": 12582912,
+      "url": "https://pub-a248afed72844944a7565dc9cbaacbb0.r2.dev/assets/textures/env_hdr_sky.png",
+      "checksum": "sha256-hdrenv9929",
+      "category": "textures"
+    },
+    {
+      "id": "engine_audio_sounds",
+      "name": "High Fidelity Engine Audio Loops (5.5 MB)",
+      "version": "1.0.0",
+      "size": 5767168,
+      "url": "https://pub-a248afed72844944a7565dc9cbaacbb0.r2.dev/assets/audio/engine_loop.mp3",
+      "checksum": "sha256-soundloop8820",
+      "category": "audio"
+    }
+  ]
+}
