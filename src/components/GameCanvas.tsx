@@ -151,9 +151,17 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     const vehicleRenderer = new VehicleRenderer(scene, reflectionTex);
     const trafficAIService = new TrafficAIService(trackHelper);
 
-    // Spawn trackside street light glow elements
+    // Spawn trackside street light glow elements (Preallocated geometry & batched color material cache)
+    const bulbGeometry = new THREE.SphereGeometry(0.3, 8, 8);
+    const bulbMaterialCache = new Map<string, THREE.MeshBasicMaterial>();
+
     trackHelper.lights.forEach((lite) => {
-      const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8), new THREE.MeshBasicMaterial({ color: lite.color }));
+      let mat = bulbMaterialCache.get(lite.color);
+      if (!mat) {
+        mat = new THREE.MeshBasicMaterial({ color: lite.color });
+        bulbMaterialCache.set(lite.color, mat);
+      }
+      const bulb = new THREE.Mesh(bulbGeometry, mat);
       bulb.position.copy(lite.position);
       scene.add(bulb);
 
@@ -177,12 +185,17 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     camera.add(linesGroup);
     scene.add(camera);
 
-    // --- 6. TICK RENDER LOOPS ---
+    // --- 6. TICK RENDER LOOPS WITH ROLLING ADAPTIVE QUALITY ENGINE ---
     let animationId = 0;
     let oldTime = performance.now();
     let accumulatedTime = 0;
     const fixedDt = 1 / 60;
     let runningTime = 0;
+
+    // Rolling FPS statistics
+    let lastFrameTime = performance.now();
+    const fpsSamples: number[] = [];
+    let currentQuality = 2; // 2 = Extreme/Ultra (PCF Shadows enabled), 1 = Low (No Shadows and balanced pixelRatio)
 
     const tick = () => {
       if (isUnmounted) return;
@@ -191,6 +204,27 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       let elapsedSec = (currentTime - oldTime) / 1000;
       elapsedSec = Math.min(elapsedSec, 0.05);
       oldTime = currentTime;
+
+      // Adaptive quality calculation
+      const frameDelta = currentTime - lastFrameTime;
+      lastFrameTime = currentTime;
+      if (frameDelta > 0) {
+        const instantFps = 1000 / frameDelta;
+        fpsSamples.push(instantFps);
+        if (fpsSamples.length > 45) {
+          fpsSamples.shift();
+          const avgFps = fpsSamples.reduce((a, b) => a + b, 0) / fpsSamples.length;
+          if (avgFps < 55 && currentQuality > 1) {
+            currentQuality = 1;
+            console.warn(`Adaptive Quality scaling: Frame rate dropped to ${avgFps.toFixed(1)} FPS (< 55). Disabling heavy shadows to sustain 60 FPS.`);
+            renderer.shadowMap.enabled = false;
+            renderer.setPixelRatio(1.0);
+            
+            // Scaledown particle emissions and effects
+            particleSystemWrapper.destroy(); // Recalibrate particle pools on the fly
+          }
+        }
+      }
 
       const currentCars = carsRef.current ? [...carsRef.current] : [];
       if (currentCars.length === 0) return;
@@ -202,7 +236,13 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       // Update weather, skies and lighting environments
       weatherSystem.update(activeWeather, activeTimeOfDay, elapsedSec);
       if (weatherSystem.currentFogColor) {
-        scene.fog = new THREE.FogExp2(weatherSystem.currentFogColor, weatherSystem.currentFogDensity);
+        // Reuse-oriented fog allocation to completely bypass O(N) GC thrashing
+        if (!scene.fog || !(scene.fog instanceof THREE.FogExp2)) {
+          scene.fog = new THREE.FogExp2(weatherSystem.currentFogColor, weatherSystem.currentFogDensity);
+        } else {
+          scene.fog.color.set(weatherSystem.currentFogColor);
+          scene.fog.density = weatherSystem.currentFogDensity;
+        }
         renderer.setClearColor(weatherSystem.currentFogColor);
       }
       lightingSystem.update(activeWeather, activeTimeOfDay, elapsedSec);
@@ -348,7 +388,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
         // --- 7. DYNAMIC CINEMATIC LENS FLARE SHIFTING ---
         if (flareRef.current && skySystem.sunDisk) {
-          const sunWorldPos = skySystem.sunDisk.position.clone();
+          // Zero runtime vector allocating via MemoryPool
+          const sunWorldPos = MemoryPool.getVector().copy(skySystem.sunDisk.position);
           const screenPos = sunWorldPos.project(camera);
 
           if (screenPos.z < 1) { // Check that sun is in front of camera frustum
@@ -441,6 +482,10 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       // Geometry and materials from speed lines
       lGeo.dispose();
       lMat.dispose();
+
+      // Clear cached streetlight resources to avoid memory leaks
+      bulbGeometry.dispose();
+      bulbMaterialCache.forEach((mat) => mat.dispose());
 
       // Clear static singletons to prevent memory leaks and recreate cleanly next time
       lodManager.clear();

@@ -3,14 +3,15 @@ import { TrackGeometryHelper } from '../utils/track';
 
 export interface WaterfallController {
   waterfallMesh: THREE.Mesh;
-  foamGroup: THREE.Group;
+  foamMesh: THREE.InstancedMesh;
   update: (elapsedSec: number) => void;
+  dispose: () => void;
 }
 
 export function buildWaterfall(scene: THREE.Scene, trackHelper: TrackGeometryHelper): WaterfallController {
   // --- 1. RUSHING WATERFALL SURFACE ---
   const wfWidth = 32;
-  const wfHeight = 85; // Taller cascades - UPDATED!
+  const wfHeight = 85; // Taller cascades
   const wfGeo = new THREE.PlaneGeometry(wfWidth, wfHeight, 1, 10);
   
   // High fidelity canvas drawing vertical cascading water-stream threads
@@ -58,12 +59,8 @@ export function buildWaterfall(scene: THREE.Scene, trackHelper: TrackGeometryHel
   waterfall.castShadow = true;
   scene.add(waterfall);
 
-  // --- 2. FOAMING SPLASHING MIST CLOUDS ---
-  // A group of semi-transparent rising mist puffs at the base of the waterfall pool
-  const foamGroup = new THREE.Group();
+  // --- 2. FOAMING SPLASHING MIST CLOUDS VIA BATCHED INSTANCEDMESH ---
   const mistCount = 32;
-  const mistPuffs: { mesh: THREE.Mesh; velY: number; baseX: number; baseZ: number; maxLife: number; life: number; scaleRate: number }[] = [];
-
   const mistMat = new THREE.MeshStandardMaterial({
     color: '#e1f5fe', // Frothy splashing sky-blue mist
     roughness: 0.98,
@@ -73,65 +70,98 @@ export function buildWaterfall(scene: THREE.Scene, trackHelper: TrackGeometryHel
   });
 
   const puffGeo = new THREE.IcosahedronGeometry(3.2, 1);
+  const instMesh = new THREE.InstancedMesh(puffGeo, mistMat, mistCount);
+  instMesh.castShadow = false;
+  instMesh.receiveShadow = false;
 
   // Place the foam vapor generator exactly at the bottom pool coordinates -35.0!
   const poolCenter = new THREE.Vector3(baseLoc.x - 3.0, -35.0, baseLoc.z - 3.0);
 
-  for (let i = 0; i < mistCount; i++) {
-    const puff = new THREE.Mesh(puffGeo, mistMat.clone());
-    
-    // Spread the starting coordinates around the plunge pool zone
+  const pData = Array.from({ length: mistCount }, () => {
     const spreadX = Math.random() * 24 - 12;
     const spreadZ = Math.random() * 24 - 12;
-
-    puff.position.set(poolCenter.x + spreadX, poolCenter.y + Math.random() * 4, poolCenter.z + spreadZ);
-    
-    const randomScale = 0.55 + Math.random() * 0.9;
-    puff.scale.set(randomScale, randomScale, randomScale);
-    foamGroup.add(puff);
-
-    mistPuffs.push({
-      mesh: puff,
+    const maxLife = 1.5 + Math.random() * 1.5;
+    return {
+      x: poolCenter.x + spreadX,
+      y: poolCenter.y + Math.random() * 4,
+      z: poolCenter.z + spreadZ,
       velY: 2.2 + Math.random() * 3.5, // rising upward speed
       baseX: poolCenter.x + spreadX,
       baseZ: poolCenter.z + spreadZ,
-      maxLife: 1.5 + Math.random() * 1.5,
-      life: Math.random() * 1.5,
+      maxLife,
+      life: Math.random() * maxLife,
       scaleRate: 0.4 + Math.random() * 0.6
-    });
+    };
+  });
+
+  const dummy = new THREE.Object3D();
+  const baseColor = new THREE.Color('#e1f5fe');
+  const tempColor = new THREE.Color();
+
+  // Position instances initially
+  for (let i = 0; i < mistCount; i++) {
+    const p = pData[i];
+    dummy.position.set(p.x, p.y, p.z);
+    const progress = p.life / p.maxLife;
+    const currentScale = (0.55 + p.scaleRate) * (1.0 - progress);
+    dummy.scale.set(currentScale, currentScale, currentScale);
+    dummy.updateMatrix();
+    instMesh.setMatrixAt(i, dummy.matrix);
   }
-  scene.add(foamGroup);
+  instMesh.instanceMatrix.needsUpdate = true;
+  scene.add(instMesh);
 
   // --- 3. EXPORT CONTROLLER ---
   return {
     waterfallMesh: waterfall,
-    foamGroup,
+    foamMesh: instMesh,
     update: (elapsedSec: number) => {
       // Texture panning animation mimicking raging downstream torrent
       if (waterTex) {
         waterTex.offset.y -= elapsedSec * 1.76;
       }
 
-      // Animate and fade rising mist particles at the splash pool base
-      mistPuffs.forEach(p => {
+      // Update instanced particles
+      for (let i = 0; i < mistCount; i++) {
+        const p = pData[i];
         p.life += elapsedSec;
         if (p.life >= p.maxLife) {
           // Recycle and reincarnate the vapor puff back at the crash basin
           p.life = 0;
-          p.mesh.position.set(p.baseX + (Math.random() * 6 - 3), poolCenter.y, p.baseZ + (Math.random() * 6 - 3));
-          p.mesh.scale.set(0.4, 0.4, 0.4);
-          (p.mesh.material as THREE.MeshStandardMaterial).opacity = 0.42;
+          p.x = p.baseX + (Math.random() * 6 - 3);
+          p.y = poolCenter.y;
+          p.z = p.baseZ + (Math.random() * 6 - 3);
         } else {
-          // Push upward and inflate
-          p.mesh.position.y += p.velY * elapsedSec;
-          const progress = p.life / p.maxLife;
-          const currentScale = 0.4 + progress * p.scaleRate * 3.5;
-          p.mesh.scale.set(currentScale, currentScale, currentScale);
-          
-          // Fade to 0 as it merges with mountain atmosphere
-          (p.mesh.material as THREE.MeshStandardMaterial).opacity = (1.0 - progress) * 0.42;
+          // Push upward
+          p.y += p.velY * elapsedSec;
         }
-      });
+
+        const progress = p.life / p.maxLife;
+        const lifeScale = 1.0 - progress;
+        const currentScale = (0.4 + progress * p.scaleRate * 3.5) * lifeScale;
+        
+        dummy.position.set(p.x, p.y, p.z);
+        dummy.scale.set(currentScale, currentScale, currentScale);
+        dummy.updateMatrix();
+        instMesh.setMatrixAt(i, dummy.matrix);
+
+        // Control item brightness to fade with environment cleanly
+        tempColor.copy(baseColor).multiplyScalar(lifeScale);
+        instMesh.setColorAt(i, tempColor);
+      }
+      instMesh.instanceMatrix.needsUpdate = true;
+      if (instMesh.instanceColor) {
+        instMesh.instanceColor.needsUpdate = true;
+      }
+    },
+    dispose: () => {
+      scene.remove(waterfall);
+      scene.remove(instMesh);
+      wfGeo.dispose();
+      wfMat.dispose();
+      waterTex.dispose();
+      puffGeo.dispose();
+      mistMat.dispose();
     }
   };
 }

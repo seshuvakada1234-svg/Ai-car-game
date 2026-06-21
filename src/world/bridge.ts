@@ -2,6 +2,14 @@ import * as THREE from 'three';
 import { TrackGeometryHelper, getTerrainHeight } from '../utils/track';
 
 export function buildBridge(scene: THREE.Scene, trackHelper: TrackGeometryHelper): void {
+  // Shared base unit geometries and materials to avoid repeated memory allocation
+  const basePillarGeo = new THREE.CylinderGeometry(0.8, 1.2, 1.0, 6);
+  const pillarMat = new THREE.MeshStandardMaterial({ color: '#2c1e12', roughness: 0.98 });
+
+  const baseHangerGeo = new THREE.CylinderGeometry(0.08, 0.08, 1.0, 4);
+  const heavyRedSteelMat = new THREE.MeshStandardMaterial({ color: '#c0392b', metalness: 0.85, roughness: 0.15 });
+  const cableMat = new THREE.MeshStandardMaterial({ color: '#7f8c8d', metalness: 0.95, roughness: 0.1 });
+
   // --- 1. DYNAMICALLY GROUNDED EAGLE PASS PILLARS ---
   // Every pillar now spans dynamically from the road spline level down to the exact terrain height
   trackHelper.curve.getSpacedPoints(180).forEach((pt, idx) => {
@@ -10,9 +18,8 @@ export function buildBridge(scene: THREE.Scene, trackHelper: TrackGeometryHelper
       const terrainY = getTerrainHeight(pt.x, pt.z, trackHelper);
       const pillarHeight = Math.max(1.0, pt.y - terrainY);
       
-      const supGeo = new THREE.CylinderGeometry(0.8, 1.2, pillarHeight, 6);
-      const supMat = new THREE.MeshStandardMaterial({ color: '#2c1e12', roughness: 0.98 });
-      const support = new THREE.Mesh(supGeo, supMat);
+      const support = new THREE.Mesh(basePillarGeo, pillarMat);
+      support.scale.set(1.0, pillarHeight, 1.0);
       
       // Position the pillar so its top aligns perfectly with the road, and its base is wedged in the bedrock
       support.position.set(pt.x, pt.y - pillarHeight / 2, pt.z);
@@ -24,7 +31,6 @@ export function buildBridge(scene: THREE.Scene, trackHelper: TrackGeometryHelper
 
   // --- 2. GROUNDED SUSPENSION BRIDGE PYLON TOWERS ---
   const bridgeTowersGroup = new THREE.Group();
-  const heavyRedSteelMat = new THREE.MeshStandardMaterial({ color: '#c0392b', metalness: 0.85, roughness: 0.15 });
   
   // Bridge tower coordinates at start and end of high suspension segment
   const towerProgresses = [0.301, 0.399];
@@ -91,7 +97,6 @@ export function buildBridge(scene: THREE.Scene, trackHelper: TrackGeometryHelper
     // --- 3. MAJESTIC CATENARY SUSPENSION CABLES ---
     // Chrome steel cables hanging from tower crown to bridge deck
     const numCableSegments = 40;
-    const cableMat = new THREE.MeshStandardMaterial({ color: '#7f8c8d', metalness: 0.95, roughness: 0.1 });
     const sPt = trackHelper.curve.getPointAt(0.301);
     const ePt = trackHelper.curve.getPointAt(0.399);
 
@@ -122,13 +127,15 @@ export function buildBridge(scene: THREE.Scene, trackHelper: TrackGeometryHelper
         // Vertical hanger rods linking catenary cable to bridge deck
         if (s > 0 && s < numCableSegments) {
           const hangerHeight = cableY - (deckPt.y + 1.0);
-          const hangerGeo = new THREE.CylinderGeometry(0.08, 0.08, hangerHeight, 4);
-          const hangerL = new THREE.Mesh(hangerGeo, cableMat);
+          
+          const hangerL = new THREE.Mesh(baseHangerGeo, cableMat);
+          hangerL.scale.set(1.0, hangerHeight, 1.0);
           hangerL.position.set(pL.x, deckPt.y + hangerHeight / 2 + 1.0, pL.z);
           hangerL.castShadow = true;
           scene.add(hangerL);
 
-          const hangerR = new THREE.Mesh(hangerGeo, cableMat);
+          const hangerR = new THREE.Mesh(baseHangerGeo, cableMat);
+          hangerR.scale.set(1.0, hangerHeight, 1.0);
           hangerR.position.set(pR.x, deckPt.y + hangerHeight / 2 + 1.0, pR.z);
           hangerR.castShadow = true;
           scene.add(hangerR);

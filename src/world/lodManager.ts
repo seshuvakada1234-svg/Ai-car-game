@@ -6,6 +6,7 @@ export interface ScenerySector {
   group: THREE.Object3D | null;
   nearDistance: number;  // Distance within which we run Full Detail
   farDistance: number;   // Distance beyond which we set visible = false
+  detailMeshes: THREE.Object3D[]; // Precomputed cache of detail-toggled nodes
 }
 
 export class LODManager {
@@ -37,14 +38,30 @@ export class LODManager {
     nearDistance = 250,
     farDistance = 480
   ): void {
+    const detailMeshes: THREE.Object3D[] = [];
+    
+    // Perform tree walk once at registration to cache target detail nodes
+    group.traverse(child => {
+      if (child.name && (
+        child.name.includes('detail') || 
+        child.name.includes('bench') || 
+        child.name.includes('post') || 
+        child.name.includes('lantern') || 
+        child.name.includes('lamp_pole')
+      )) {
+        detailMeshes.push(child);
+      }
+    });
+
     this.sectors.push({
       name,
       center: new THREE.Vector3(centerX, centerY, centerZ),
       group,
       nearDistance,
-      farDistance
+      farDistance,
+      detailMeshes
     });
-    console.log(`Registered Scenery LOD Sector: ${name} (far: ${farDistance}m)`);
+    console.log(`Registered Scenery LOD Sector: ${name} (far: ${farDistance}m, detailed segments cached: ${detailMeshes.length})`);
   }
 
   /**
@@ -53,13 +70,14 @@ export class LODManager {
   public update(playerPos: THREE.Vector3): void {
     if (!playerPos || typeof playerPos.distanceTo !== 'function') return;
 
-    for (const sector of this.sectors) {
-      if (!sector.group || !sector.center || typeof sector.center.distanceTo !== 'function') continue;
+    for (let i = 0; i < this.sectors.length; i++) {
+      const sector = this.sectors[i];
+      if (!sector.group || !sector.center) continue;
 
       const dist = playerPos.distanceTo(sector.center);
 
       if (dist > sector.farDistance) {
-        // Unload entirely from frustum
+        // Unload entirely from view
         if (sector.group.visible) {
           sector.group.visible = false;
         }
@@ -70,20 +88,14 @@ export class LODManager {
         }
 
         // Apply progressive detail scaling (Level of Detail)
-        if (dist > sector.nearDistance) {
-          // Medium/Low LOD: hide fine accents like lanterns, posts, or minor details
-          sector.group.traverse(child => {
-            if (child.name && (child.name.includes('detail') || child.name.includes('bench') || child.name.includes('post') || child.name.includes('lantern') || child.name.includes('lamp_pole'))) {
-              if (child.visible) child.visible = false;
-            }
-          });
-        } else {
-          // High LOD: enable every beautiful submesh detail
-          sector.group.traverse(child => {
-            if (child.name && (child.name.includes('detail') || child.name.includes('bench') || child.name.includes('post') || child.name.includes('lantern') || child.name.includes('lamp_pole'))) {
-              if (!child.visible) child.visible = true;
-            }
-          });
+        const showDetails = dist <= sector.nearDistance;
+        const details = sector.detailMeshes;
+        const len = details.length;
+        for (let idx = 0; idx < len; idx++) {
+          const child = details[idx];
+          if (child.visible !== showDetails) {
+            child.visible = showDetails;
+          }
         }
       }
     }
