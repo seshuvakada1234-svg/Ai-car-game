@@ -1,21 +1,20 @@
 import { RoomData, RoomPlayer } from './RoomManager';
 
 export const AI_NAMES = [
-  'Shadow AI', 'Thunder AI', 'Blaze AI',
-  'Ghost AI', 'Falcon AI', 'Storm AI'
+  'Nova', 'Phantom', 'Titan'
 ];
 
 export interface GridEntry {
   position: number;       // 1-based grid slot
   player: RoomPlayer;
-  displayName: string;    // "Speedster (Host)" / "Shadow AI"
+  displayName: string;    // "Speedster (Host)" / "Nova"
   isHuman: boolean;
 }
 
 export class PlayerManager {
-  static readonly MAX_PLAYERS = 6;
+  static readonly MAX_PLAYERS = 4;
 
-  // ── Build the full 6-slot grid, filling empty slots with AI ──────────────
+  // ── Build the full 4-slot grid, filling empty slots with AI ──────────────
 
   static buildGrid(room: RoomData): GridEntry[] {
     const humans = room.players.filter(p => !p.isAI);

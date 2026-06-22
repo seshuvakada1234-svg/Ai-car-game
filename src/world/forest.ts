@@ -4,6 +4,8 @@ import { terrainManager } from './TerrainManager';
 import { lodManager } from './lodManager';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { GLTFMaterialsPBRSpecularGlossinessExtension } from './procedural';
+import { applyGltfMaterialFix } from '../utils/gltfMaterialFix';
 
 interface ForestTree {
   id: number;
@@ -50,8 +52,9 @@ class SimpleNoise {
   }
 }
 
-class ForestSystem {
+export class ForestSystem {
   private static instance: ForestSystem | null = null;
+  public static initialized = false;
 
   // Active forest coordinates
   private trees: ForestTree[] = [];
@@ -103,11 +106,12 @@ class ForestSystem {
    * then launches background asynchronous preloading of the high-fidelity GLB models.
    */
   public init(scene: THREE.Scene, trackHelper: TrackGeometryHelper): void {
-    if (this.isInitialized) {
+    if (this.isInitialized || ForestSystem.initialized) {
       console.log('ForestSystem already initialized, skipping duplicate init.');
       return;
     }
     this.isInitialized = true;
+    ForestSystem.initialized = true;
 
     this.scene = scene;
     this.trackHelper = trackHelper;
@@ -795,6 +799,7 @@ class ForestSystem {
     const draco = new DRACOLoader();
     draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
     loader.setDRACOLoader(draco);
+    loader.register((parser) => new GLTFMaterialsPBRSpecularGlossinessExtension(parser));
 
     const allUrls = [
       'https://pub-a248afed72844944a7565dc9cbaacbb0.r2.dev/Trees/pine_tree_-_ps1_low_poly.glb',
@@ -830,6 +835,7 @@ class ForestSystem {
         url,
         (gltf) => {
           console.log(`Successfully completed preloading GLB: ${url}`);
+          applyGltfMaterialFix(gltf.scene);
           ForestSystem.treeCache.set(url, gltf.scene);
           ForestSystem.activeDownloads.delete(url);
           if (index === 4) {
@@ -1172,7 +1178,75 @@ class ForestSystem {
   }
 
   public destroy(): void {
+    ForestSystem.initialized = false;
     this.isInitialized = false;
+
+    // Collect all unique geometries, materials, and textures to dispose
+    const geometriesToDispose = new Set<THREE.BufferGeometry>();
+    const materialsToDispose = new Set<THREE.Material>();
+    const texturesToDispose = new Set<THREE.Texture>();
+
+    // Helper function to register an InstancedMesh for removal and disposal
+    const cleanupMesh = (mesh: THREE.InstancedMesh) => {
+      if (!mesh) return;
+      if (this.scene) {
+        this.scene.remove(mesh);
+      }
+      if (mesh.geometry) {
+        geometriesToDispose.add(mesh.geometry);
+      }
+      if (mesh.material) {
+        if (Array.isArray(mesh.material)) {
+          mesh.material.forEach(m => {
+            materialsToDispose.add(m);
+            if ((m as any).map) texturesToDispose.add((m as any).map);
+          });
+        } else {
+          materialsToDispose.add(mesh.material);
+          if ((mesh.material as any).map) texturesToDispose.add((mesh.material as any).map);
+        }
+      }
+    };
+
+    // Dispose highInsts
+    this.highInsts.forEach(arr => {
+      if (arr) {
+        arr.forEach(cleanupMesh);
+      }
+    });
+
+    // Dispose medInsts
+    this.medInsts.forEach(arr => {
+      if (arr) {
+        arr.forEach(cleanupMesh);
+      }
+    });
+
+    // Dispose lowInsts
+    this.lowInsts.forEach(mesh => {
+      if (mesh) {
+        cleanupMesh(mesh);
+      }
+    });
+
+    // Dispose roadsideInsts
+    this.roadsideInsts.forEach(arr => {
+      if (arr) {
+        arr.forEach(cleanupMesh);
+      }
+    });
+
+    // Actually dispose!
+    geometriesToDispose.forEach(g => {
+      try { g.dispose(); } catch (e) {}
+    });
+    materialsToDispose.forEach(m => {
+      try { m.dispose(); } catch (e) {}
+    });
+    texturesToDispose.forEach(t => {
+      try { t.dispose(); } catch (e) {}
+    });
+
     this.trees = [];
     this.treesByType = [[], [], [], []];
     this.highInsts = [[], [], [], []];

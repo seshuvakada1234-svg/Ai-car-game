@@ -3,8 +3,9 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { CarState } from '../types';
 import { assetManager } from '../services/AssetManager';
+import { applyGltfMaterialFix } from '../utils/gltfMaterialFix';
 
-class GLTFMaterialsPBRSpecularGlossinessExtension {
+export class GLTFMaterialsPBRSpecularGlossinessExtension {
   public name = 'KHR_materials_pbrSpecularGlossiness';
   public parser: any;
 
@@ -60,7 +61,6 @@ let isPreloadingStarted = false;
 
 // Shared cache for loaded GLTF models to prevent repeated network requests
 export const gltfModelCache = {
-  lamborghini_aventador: null as THREE.Group | null,
   bugatti_chiron_top_edition: null as THREE.Group | null,
   ferrari_purosangue: null as THREE.Group | null,
   porsche_911_gt3: null as THREE.Group | null,
@@ -89,7 +89,6 @@ export function setPlayerSelectedModelKey(key: string | null): void {
 // Dynamically selects one of the successfully loaded cars for the player at game start
 export function selectRandomPlayerCar(): void {
   const availableKeys = [
-    'lamborghini_aventador',
     'bugatti_chiron_top_edition',
     'ferrari_purosangue',
     'porsche_911_gt3'
@@ -106,7 +105,6 @@ export function selectRandomPlayerCar(): void {
 // Map each vehicle state stably to its respective 3D model (stretching across the line dynamically)
 export function getCarModelForId(id: string): THREE.Group | null {
   const loadedModels = [
-    { key: 'lamborghini_aventador', model: gltfModelCache.lamborghini_aventador },
     { key: 'bugatti_chiron_top_edition', model: gltfModelCache.bugatti_chiron_top_edition },
     { key: 'ferrari_purosangue', model: gltfModelCache.ferrari_purosangue },
     { key: 'porsche_911_gt3', model: gltfModelCache.porsche_911_gt3 }
@@ -346,26 +344,30 @@ export async function loadSpecificCarModel(
   carKey: 'lamborghini' | 'ferrari' | 'bugatti' | 'porsche',
   onProgress: (percent: number) => void
 ): Promise<THREE.Group> {
+  let effectiveCarKey = carKey;
+  if (effectiveCarKey === 'lamborghini') {
+    console.warn("lamborghini_aventador.glb removed - using fallback car.");
+    effectiveCarKey = 'ferrari';
+  }
+
   const cacheKeyMap = {
-    lamborghini: 'lamborghini_aventador',
     ferrari: 'ferrari_purosangue',
     bugatti: 'bugatti_chiron_top_edition',
     porsche: 'porsche_911_gt3'
   } as const;
 
   const urlMap = {
-    lamborghini: 'https://pub-a248afed72844944a7565dc9cbaacbb0.r2.dev/cars/lamborghini_aventador.glb',
     ferrari: 'https://pub-a248afed72844944a7565dc9cbaacbb0.r2.dev/cars/2023_ferrari_purosangue.glb',
     bugatti: 'https://pub-a248afed72844944a7565dc9cbaacbb0.r2.dev/cars/bugatti_chiron_top_edition.glb',
     porsche: 'https://pub-a248afed72844944a7565dc9cbaacbb0.r2.dev/cars/porsche_911_gt3.glb'
   };
 
-  const key = cacheKeyMap[carKey];
-  const url = urlMap[carKey];
+  const key = cacheKeyMap[effectiveCarKey];
+  const url = urlMap[effectiveCarKey];
 
-  if (gltfModelCache[key]) {
+  if ((gltfModelCache as any)[key]) {
     onProgress(100);
-    return gltfModelCache[key]!;
+    return (gltfModelCache as any)[key]!;
   }
 
   if (activeDownloadPromises.has(key)) {
@@ -448,13 +450,8 @@ export async function loadSpecificCarModel(
               car.position.y
             );
 
-            // 9. Ensure shadows work
-            car.traverse(node => {
-              if (node instanceof THREE.Mesh) {
-                node.castShadow = true;
-                node.receiveShadow = true;
-              }
-            });
+            // 9. Ensure shadows and PBR standard materials are cleanly synchronized
+            applyGltfMaterialFix(car);
 
             const container = new THREE.Group();
             container.add(car);
@@ -464,13 +461,11 @@ export async function loadSpecificCarModel(
 
             gltfModelCache[key] = container;
 
-            if (carKey === 'lamborghini') {
-              gltfModelCache.playerModel = container;
-            } else if (carKey === 'bugatti') {
+            if (effectiveCarKey === 'bugatti') {
               gltfModelCache.bugatti_chiron = container;
-            } else if (carKey === 'ferrari') {
+            } else if (effectiveCarKey === 'ferrari') {
               gltfModelCache.ferrari_sf90 = container;
-            } else if (carKey === 'porsche') {
+            } else if (effectiveCarKey === 'porsche') {
               gltfModelCache.porsche_911 = container;
             }
 
@@ -605,10 +600,14 @@ export const preloadGLTFAssets = async (): Promise<void> => {
     const tryLoadPath = async (paths: string[]): Promise<THREE.Group | null> => {
       for (const p of paths) {
         try {
-          const gltf = await assetManager.loadGLTF(p);
-          return gltf.scene || gltf;
+          const loadPromise = assetManager.loadGLTF(p);
+          const timeoutPromise = new Promise<any>((_, reject) => 
+            setTimeout(() => reject(new Error(`Timeout loading path ${p}`)), 2000)
+          );
+          const gltf = await Promise.race([loadPromise, timeoutPromise]);
+          return gltf?.scene || gltf || null;
         } catch (e) {
-          // ignore
+          console.warn(`[tryLoadPath] Failed or timed out loading asset at ${p}:`, e);
         }
       }
       return null;

@@ -19,7 +19,6 @@ const DEFAULT_MAPS = [
 ];
 
 const DEFAULT_CARS = [
-  { id: 'lamborghini', name: 'Lamborghini Aventador', topSpeed: 350, acceleration: '2.9s', handling: 85, desc: 'V12 naturally-aspirated aerodynamic monster with roaring track energy.', colorPreset: '#ff5500', class: 'S CLASS' },
   { id: 'ferrari', name: 'Ferrari Purosangue', topSpeed: 310, acceleration: '3.3s', handling: 90, desc: 'Supreme active-suspension SUV utilities delivering unmatched active stability.', colorPreset: '#ff003c', class: 'A CLASS' },
   { id: 'bugatti', name: 'Bugatti Chiron', topSpeed: 420, acceleration: '2.4s', handling: 80, desc: 'Unmatched continuous speed powered by a monstrous quad-turbo W16.', colorPreset: '#00ccff', class: 'HYPER CLASS' },
   { id: 'porsche', name: 'Porsche 911 GT3', topSpeed: 320, acceleration: '3.2s', handling: 98, desc: 'Surgeon-like track precision crafted directly from pure GT motorsport racing heritage.', colorPreset: '#00ff3c', class: 'A CLASS' },

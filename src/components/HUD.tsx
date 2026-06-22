@@ -80,6 +80,17 @@ export const HUD: React.FC<HUDProps> = ({
         setGasPressed(true);
       } else if (key === 's' || e.key === 'ArrowDown') {
         setBrakePressed(true);
+      } else if (key === 'a' || e.key === 'ArrowLeft') {
+        setLeftPressed(true);
+        setControls(prev => ({ ...prev, left: true }));
+      } else if (key === 'd' || e.key === 'ArrowRight') {
+        setRightPressed(true);
+        setControls(prev => ({ ...prev, right: true }));
+      } else if (e.key === ' ') {
+        setControls(prev => ({ ...prev, nitro: true }));
+      } else if (e.key === 'Shift') {
+        setDriftPressed(true);
+        setControls(prev => ({ ...prev, handbrake: true }));
       }
     };
 
@@ -89,6 +100,17 @@ export const HUD: React.FC<HUDProps> = ({
         setGasPressed(false);
       } else if (key === 's' || e.key === 'ArrowDown') {
         setBrakePressed(false);
+      } else if (key === 'a' || e.key === 'ArrowLeft') {
+        setLeftPressed(false);
+        setControls(prev => ({ ...prev, left: false }));
+      } else if (key === 'd' || e.key === 'ArrowRight') {
+        setRightPressed(false);
+        setControls(prev => ({ ...prev, right: false }));
+      } else if (e.key === ' ') {
+        setControls(prev => ({ ...prev, nitro: false }));
+      } else if (e.key === 'Shift') {
+        setDriftPressed(false);
+        setControls(prev => ({ ...prev, handbrake: false }));
       }
     };
 
@@ -99,7 +121,7 @@ export const HUD: React.FC<HUDProps> = ({
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [isPaused]);
+  }, [isPaused, setControls]);
 
   // Touch & Gesture Control references to capture non-passive raw events
   const btnLeftRef = useRef<HTMLButtonElement>(null);
@@ -416,10 +438,8 @@ export const HUD: React.FC<HUDProps> = ({
       nextForward = false;
       nextBackward = false;
       
-      const absSpeed = Math.abs(player.speed);
-      if (absSpeed < 0.1) {
-        nextGear = 'P';
-      } else if (player.speed < -0.1) {
+      // Automatic transmission stays in active gear (D or R) when coasting or stopped. No auto 'P' lock.
+      if (gear === 'R') {
         nextGear = 'R';
       } else {
         nextGear = 'D';
@@ -882,6 +902,73 @@ export const HUD: React.FC<HUDProps> = ({
 
         </div>
 
+      </div>
+
+      {/* ================= TELEMETRY DEBUG OVERLAY (HIGH CONTRAST FLOATING SLATE CARD) ================= */}
+      <div className="absolute top-20 right-4 z-20 pointer-events-auto select-none">
+        <div className="bg-slate-950/90 border border-emerald-500/30 backdrop-blur-md p-3.5 rounded-xl flex flex-col space-y-1.5 w-60 shadow-2xl font-mono text-[9px] text-slate-300">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-1 mb-1">
+            <span className="text-[10px] font-extrabold text-emerald-400 uppercase tracking-widest flex items-center">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5 animate-ping" />
+              VEHICLE TELEMETRY
+            </span>
+            <span className="text-[8px] text-slate-500 uppercase">SYS_OK</span>
+          </div>
+          
+          <div className="flex justify-between">
+            <span className="text-slate-400 font-bold">ENGINE STATE</span>
+            <span className="text-emerald-400 font-bold">RUNNING</span>
+          </div>
+
+          <div className="flex justify-between">
+            <span className="text-slate-400 font-bold">GEARBOX STATE</span>
+            <span className="text-sky-400 font-bold">GEAR {player.gear || 'D'}</span>
+          </div>
+
+          <div className="flex justify-between">
+            <span className="text-slate-400 font-bold">SPEED (KM/H)</span>
+            <span className="text-white font-bold">{Math.floor(Math.abs(player.speed) * 3.6)} km/h</span>
+          </div>
+
+          <div className="flex justify-between">
+            <span className="text-slate-400 font-bold">THROTTLE INPUT</span>
+            <span className="text-emerald-400 font-bold">{player.throttle !== undefined ? `${Math.round(player.throttle * 100)}%` : '0%'}</span>
+          </div>
+
+          <div className="flex justify-between">
+            <span className="text-slate-400 font-bold">BRAKE INPUT</span>
+            <span className="text-rose-400 font-bold">{player.brake !== undefined ? `${Math.round(player.brake * 100)}%` : '0%'}</span>
+          </div>
+
+          <div className="flex justify-between">
+            <span className="text-slate-400 font-bold">STEERING ANGLE</span>
+            <span className="text-amber-400 font-bold">{player.steering !== undefined ? player.steering.toFixed(3) : '0.000'}</span>
+          </div>
+
+          <div className="flex justify-between">
+            <span className="text-slate-400 font-bold">PHYSICS AWAKE</span>
+            <span className="text-emerald-400 font-bold">{player.awake !== false ? 'TRUE' : 'FALSE'}</span>
+          </div>
+
+          <div className="flex justify-between">
+            <span className="text-slate-400 font-bold">BODY MASS</span>
+            <span className="text-slate-200">{player.mass ? `${player.mass} KG` : '1450 KG'}</span>
+          </div>
+
+          <div className="flex flex-col pt-1 border-t border-slate-950">
+            <span className="text-slate-500 text-[8px] uppercase">LINEAR VELOCITY</span>
+            <div className="flex justify-between font-mono text-[8px] text-slate-400">
+              <span>X: {(player.velocity?.x ?? 0).toFixed(2)}</span>
+              <span>Y: {(player.velocity?.y ?? 0).toFixed(2)}</span>
+              <span>Z: {(player.velocity?.z ?? 0).toFixed(2)}</span>
+            </div>
+          </div>
+
+          <div className="flex justify-between">
+            <span className="text-slate-500 text-[8px] uppercase">ANGULAR VELOCITY</span>
+            <span className="font-mono text-[8.5px] text-slate-400">{(player.angularVelocity ?? 0).toFixed(3)} rad/s</span>
+          </div>
+        </div>
       </div>
 
     </div>

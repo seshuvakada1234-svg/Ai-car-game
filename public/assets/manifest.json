@@ -1,16 +1,7 @@
 {
   "version": "1.0.0",
-  "totalSize": "105.6 MB",
+  "totalSize": "96.9 MB",
   "assets": [
-    {
-      "id": "lamborghini_aventador",
-      "name": "Lamborghini Aventador SVJ (8.3 MB)",
-      "version": "1.0.0",
-      "size": 8703180,
-      "url": "https://pub-a248afed72844944a7565dc9cbaacbb0.r2.dev/cars/lamborghini_aventador.glb",
-      "checksum": "sha256-lambosvj9183fake",
-      "category": "cars"
-    },
     {
       "id": "ferrari_purosangue",
       "name": "Ferrari Purosangue Line (6.1 MB)",

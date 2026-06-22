@@ -12,6 +12,7 @@ const BODY_OFFSET = 0.02;
 const _yawAxis = new THREE.Vector3(0, 1, 0);
 
 export class VehicleRenderer {
+  public static initialized = false;
   private scene: THREE.Scene;
   private reflectionTex: THREE.Texture | null;
 
@@ -32,6 +33,7 @@ export class VehicleRenderer {
   constructor(scene: THREE.Scene, reflectionTex: THREE.Texture | null) {
     this.scene         = scene;
     this.reflectionTex = reflectionTex;
+    VehicleRenderer.initialized = true;
   }
 
   private getGroundHeight(x: number, z: number, terrainManager: any, fallbackY: number): number {
@@ -54,7 +56,10 @@ export class VehicleRenderer {
     if (carData.tailLightMat) this.tailLightMatMap.set(carState.id, carData.tailLightMat);
     if (carData.paintMat)     this.paintMatMap.set(carState.id,     carData.paintMat);
 
-    if (carState.id === 'player') (window as any).playerCarAddedToScene = true;
+    if (carState.id === 'player') {
+      (window as any).playerCarAddedToScene = true;
+      (window as any).carLoaded = true;
+    }
   }
 
   public destroy(): void {

@@ -86,7 +86,7 @@ export const UserLeaderboardPage: React.FC = () => {
                         </div>
                       </td>
                       <td className="p-4 text-xs font-semibold text-slate-400 uppercase font-mono">
-                        {item.selectedCar || 'lamborghini'}
+                        {item.selectedCar || 'ferrari'}
                       </td>
                       <td className="p-4 text-[10.5px] text-slate-500 uppercase font-mono">
                         {date}

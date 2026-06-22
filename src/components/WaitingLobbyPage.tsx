@@ -310,7 +310,6 @@ export const WaitingLobbyPage: React.FC = () => {
                     onChange={(e) => handleCarChange(e.target.value)}
                     className="bg-slate-950 border border-slate-800 text-slate-100 font-bold text-xs p-2.5 rounded-xl outline-none cursor-pointer w-full transition"
                   >
-                    <option value="lamborghini">Lamborghini Aventador</option>
                     <option value="ferrari">Ferrari Purosangue</option>
                     <option value="bugatti">Bugatti Chiron</option>
                     <option value="porsche">Porsche 911 GT3</option>

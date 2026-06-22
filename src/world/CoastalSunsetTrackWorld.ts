@@ -5,6 +5,8 @@ import { terrainManager } from './TerrainManager';
 import { buildFinishArea, FinishAreaController } from './finishArea';
 
 export class CoastalSunsetTrackWorld {
+  public static initialized = false;
+
   private finishAreaCtrl: FinishAreaController | null = null;
   private roadMaterial: THREE.MeshStandardMaterial | null = null;
   private shoulderMaterial: THREE.MeshStandardMaterial | null = null;
@@ -13,6 +15,17 @@ export class CoastalSunsetTrackWorld {
   private oceanSpecularWaveMesh: THREE.Mesh | null = null;
 
   constructor(scene: THREE.Scene, trackHelper: TrackGeometryHelper) {
+    if (CoastalSunsetTrackWorld.initialized) {
+      console.log('CoastalSunsetTrackWorld: Already initialized. Guarding against duplicate initialization.');
+      (window as any).mapLoaded = true;
+      (window as any).worldReady = true;
+      return;
+    }
+    CoastalSunsetTrackWorld.initialized = true;
+
+    // Set mapLoaded to true
+    (window as any).mapLoaded = true;
+
     // 1. Prepack height cache
     terrainManager.initialize(trackHelper);
 
@@ -34,6 +47,7 @@ export class CoastalSunsetTrackWorld {
     // 7. Finish Straight Gate Banner
     this.buildFinishStraightGate(scene, trackHelper);
 
+    (window as any).worldReady = true;
     console.log("Coastal Sunset Track World loaded successfully. Fast and super optimized.");
   }
 

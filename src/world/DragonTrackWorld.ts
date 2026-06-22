@@ -16,6 +16,8 @@ import { terrainManager } from './TerrainManager';
 import { lodManager } from './lodManager';
 
 export class DragonTrackWorld {
+  public static initialized = false;
+
   private waterfallCtrl: WaterfallController | null = null;
   private finishAreaCtrl: FinishAreaController | null = null;
   private animalsCtrl: AnimalController | null = null;
@@ -31,6 +33,17 @@ export class DragonTrackWorld {
   private signTextures: { [key: string]: THREE.CanvasTexture } = {};
 
   constructor(scene: THREE.Scene, trackHelper: TrackGeometryHelper) {
+    if (DragonTrackWorld.initialized) {
+      console.log('DragonTrackWorld: Already initialized. Guarding against duplicate initialization.');
+      (window as any).mapLoaded = true;
+      (window as any).worldReady = true;
+      return;
+    }
+    DragonTrackWorld.initialized = true;
+
+    // Set mapLoaded to true
+    (window as any).mapLoaded = true;
+
     // 1. Pre-bake Terrain Heightmap once before anything else
     terrainManager.initialize(trackHelper);
 
@@ -72,6 +85,8 @@ export class DragonTrackWorld {
     buildHighway(scene, trackHelper);
     this.finishAreaCtrl = buildFinishArea(scene, trackHelper);
     this.animalsCtrl = buildAnimals(scene, trackHelper);
+
+    (window as any).worldReady = true;
   }
 
   public update(elapsedSec: number, trackHelper: TrackGeometryHelper, playerRank = 1, isFinished = false, weather = 'sunny'): void {

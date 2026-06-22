@@ -17,13 +17,6 @@ export interface AssetInfo {
 export class AssetManager {
   private static assets: AssetInfo[] = [
     {
-      id: 'lamborghini_aventador',
-      name: 'Lamborghini Aventador SVJ',
-      url: 'https://pub-a248afed72844944a7565dc9cbaacbb0.r2.dev/cars/lamborghini_aventador.glb',
-      size: 19083264,
-      category: 'cars',
-    },
-    {
       id: 'ferrari_purosangue',
       name: 'Ferrari Purosangue SUV',
       url: 'https://pub-a248afed72844944a7565dc9cbaacbb0.r2.dev/cars/2023_ferrari_purosangue.glb',

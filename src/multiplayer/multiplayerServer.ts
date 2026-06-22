@@ -10,7 +10,7 @@ import { RoomCodeGenerator } from './RoomCodeGenerator';
 export interface ServerPlayer {
   id: string;
   name: string;
-  selectedCar: 'lamborghini' | 'ferrari' | 'bugatti' | 'porsche';
+  selectedCar: 'ferrari' | 'bugatti' | 'porsche';
   carColor: string;
   ready: boolean;
   isHost: boolean;
@@ -113,7 +113,7 @@ export function setupMultiplayerWebSocket(server: Server) {
             const firstPlayer: ServerPlayer = {
               id: playerId,
               name: playerName || 'Host Racer',
-              selectedCar: selectedCar || 'lamborghini',
+              selectedCar: (selectedCar as any) || 'ferrari',
               carColor: carColor || '#ff5500',
               ready: true,
               isHost: true,
@@ -174,7 +174,7 @@ export function setupMultiplayerWebSocket(server: Server) {
             const joinedPlayer: ServerPlayer = {
               id: playerId,
               name: playerName || 'Challenger',
-              selectedCar: selectedCar || 'lamborghini',
+              selectedCar: (selectedCar as any) || 'ferrari',
               carColor: carColor || '#00ffcc',
               ready: room.isLiveMode ? true : false, // Autoready in live mode
               isHost: false,
@@ -282,7 +282,7 @@ export function setupMultiplayerWebSocket(server: Server) {
                     existing = {
                       id: ai.id,
                       name: ai.name,
-                      selectedCar: ai.selectedCar || 'lamborghini',
+                      selectedCar: ai.selectedCar || 'ferrari',
                       carColor: ai.color || '#ff0000',
                       ready: true,
                       isHost: false,
@@ -438,13 +438,13 @@ function startLobbyTicker(room: ServerRoom) {
 function triggerRaceLaunch(room: ServerRoom) {
   room.phase = 'countdown';
   
-  // Fill remaining slots automatically with AI competitors (up to 6 cars max)
+  // Fill remaining slots automatically with AI competitors (up to 3 AI cars max)
   const humanCount = Array.from(room.players.values()).filter(p => !p.isAI).length;
-  const aiCountNeeded = Math.max(0, 6 - humanCount);
+  const aiCountNeeded = Math.max(0, Math.min(3, 4 - humanCount));
 
   // Generate randomized pro racing AI names & styles
-  const aiNames = ['Phoenix', 'Viper', 'Thunder', 'Specter', 'Zephyr', 'Apex'];
-  const aiColors = ['#ff053c', '#ffe105', '#00f6ff', '#ffa200', '#df961a', '#bebebe'];
+  const aiNames = ['Nova', 'Phantom', 'Titan'];
+  const aiColors = ['#ffe105', '#00f6ff', '#ffa200'];
 
   for (let a = 0; a < aiCountNeeded; a++) {
     const aiId = `ai_fill_${a}_${Math.random().toString(36).substring(2, 6)}`;
@@ -454,7 +454,7 @@ function triggerRaceLaunch(room: ServerRoom) {
     const filledAI: ServerPlayer = {
       id: aiId,
       name,
-      selectedCar: ['lamborghini', 'ferrari', 'bugatti', 'porsche'][Math.floor(Math.random() * 4)] as any,
+      selectedCar: ['ferrari', 'bugatti', 'porsche'][Math.floor(Math.random() * 3)] as any,
       carColor: color,
       ready: true,
       isHost: false,

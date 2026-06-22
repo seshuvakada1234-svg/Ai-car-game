@@ -45,7 +45,7 @@ export function useAssetStatus() {
     }
     
     // Check if at least one car is fully cached
-    const carKeys = ['lamborghini_aventador', 'ferrari_purosangue', 'bugatti_chiron_top_edition', 'porsche_911_gt3'];
+    const carKeys = ['ferrari_purosangue', 'bugatti_chiron_top_edition', 'porsche_911_gt3'];
     const hasCar = carKeys.some(k => map[k]);
     if (!hasCar) ok = false;
 

@@ -10,8 +10,8 @@ import { ShaderCompileScreen } from './ShaderCompileScreen';
 import { DragonTrackWorld } from '../world/DragonTrackWorld';
 import { CoastalSunsetTrackWorld } from '../world/CoastalSunsetTrackWorld';
 import { lodManager } from '../world/lodManager';
-import { terrainManager } from '../world/TerrainManager';
-import { forestSystem } from '../world/forest';
+import { terrainManager, TerrainManager } from '../world/TerrainManager';
+import { forestSystem, ForestSystem } from '../world/forest';
 import { MemoryPool } from '../utils/memoryPool';
 
 // Dynamic modular systems integration
@@ -40,6 +40,10 @@ interface GameCanvasProps {
   weather?: 'sunny' | 'cloudy' | 'foggy' | 'rain';
 }
 
+// Shared global instances to preserve WebGL context and loaded GPU memory across React mount/unmount lifecycles
+let globalRenderer: THREE.WebGLRenderer | null = null;
+let globalCanvas: HTMLCanvasElement | null = null;
+
 const GameCanvasComponent: React.FC<GameCanvasProps> = ({
   cars,
   playerControls,
@@ -54,12 +58,12 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
   weather = 'sunny',
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const flareRef = useRef<HTMLDivElement>(null);
   const speedVignetteRef = useRef<HTMLDivElement>(null);
 
   const [warming, setWarming] = React.useState(true);
   const [warmProgress, setWarmProgress] = React.useState(15);
+  const [contextKey, setContextKey] = React.useState(0);
 
   useEffect(() => {
     const startTime = Date.now();
@@ -107,25 +111,99 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
   useEffect(() => { weatherRef.current = weather; }, [weather]);
 
   useEffect(() => {
-    if (!canvasRef.current || !containerRef.current) return;
+    if (!containerRef.current) return;
 
     let isUnmounted = false;
 
-    // --- 1. INITIALIZE THREE.JS SCENE, CAMERA, RENDERER ---
+    // --- 1. DOM RE-PARENTING FOR INSTANT LIFECYCLE RECOVERY & ZERO CONTEXT LOSS ---
+    if (!globalCanvas) {
+      globalCanvas = document.createElement('canvas');
+      globalCanvas.className = "block focus:outline-none";
+      globalCanvas.style.position = "fixed";
+      globalCanvas.style.inset = "0";
+      globalCanvas.style.width = "100vw";
+      globalCanvas.style.height = "100dvh";
+      globalCanvas.style.display = "block";
+      globalCanvas.style.margin = "0";
+      globalCanvas.style.padding = "0";
+      globalCanvas.style.borderRadius = "0";
+      globalCanvas.style.maxWidth = "none";
+      globalCanvas.style.outline = 'none';
+      globalCanvas.style.border = 'none';
+    }
+
+    if (containerRef.current && globalCanvas.parentNode !== containerRef.current) {
+      containerRef.current.appendChild(globalCanvas);
+    }
+
+    if (!globalRenderer) {
+      globalRenderer = new THREE.WebGLRenderer({
+        canvas: globalCanvas,
+        antialias: false,
+        powerPreference: 'high-performance',
+        alpha: false,
+        depth: true,
+        stencil: false,
+        precision: 'mediump',
+      });
+      globalRenderer.shadowMap.enabled = true;
+      globalRenderer.shadowMap.type = THREE.PCFShadowMap;
+      globalRenderer.outputColorSpace = THREE.SRGBColorSpace;
+      globalRenderer.toneMapping = THREE.ACESFilmicToneMapping;
+      globalRenderer.toneMappingExposure = 1.0;
+    }
+
+    const renderer = globalRenderer;
+    const isMobileDevice = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    renderer.setPixelRatio(isMobileDevice ? 1.0 : 1.5);
+    renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight);
+
+    // --- 1B. CONTEXT LOSS RECOVERY HANDLING ---
+    const handleContextLost = (e: Event) => {
+      e.preventDefault();
+      console.warn('GameCanvas: WebGL Context Lost detected! Halting render buffer ticks...');
+    };
+
+    const handleContextRestored = () => {
+      console.log('GameCanvas: WebGL Context Restored! Reinitializing materials and world systems.');
+      try {
+        if (globalRenderer) {
+          globalRenderer.dispose();
+        }
+      } catch (err) {
+        console.error('Error disposing globalRenderer on lost/restored:', err);
+      }
+      globalRenderer = null;
+      globalCanvas = null;
+
+      // Force state flags reset to rebuild objects
+      DragonTrackWorld.initialized = false;
+      CoastalSunsetTrackWorld.initialized = false;
+      ForestSystem.initialized = false;
+      TerrainManager.initialized = false;
+      ShaderPreloader.initialized = false;
+      ParticleSystem.initialized = false;
+      VehicleRenderer.initialized = false;
+      WeatherSystem.initialized = false;
+      AudioSystem.initialized = false;
+
+      // Trigger re-mount/re-initialization of WebGL context and assets
+      setContextKey(prev => prev + 1);
+    };
+
+    globalCanvas.addEventListener('webglcontextlost', handleContextLost, false);
+    globalCanvas.addEventListener('webglcontextrestored', handleContextRestored, false);
+
+    // Reset window loading and compilation tracking flags for the new race
+    (window as any).carLoaded = false;
+    (window as any).playerCarAddedToScene = false;
+    (window as any).mapLoaded = false;
+    (window as any).shadersCompiled = false;
+    (window as any).worldReady = false;
+
+    // --- 1C. SCENE & CAMERA CONFIGURATION ---
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(62, 1, 0.4, 1800);
-    const renderer = new THREE.WebGLRenderer({
-      canvas: canvasRef.current,
-      antialias: false,
-      powerPreference: 'high-performance',
-    });
-    renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFShadowMap;
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.0;
 
     // --- 2. ENVIRONMENT COLOR MAP FOR REFLECTIONS ---
     const createReflectionMap = () => {
@@ -176,6 +254,9 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
     const cameraController = new CameraController(camera, 62, scene);
     const vehicleRenderer = new VehicleRenderer(scene, reflectionTex);
     const trafficAIService = new TrafficAIService(trackHelper);
+
+    // Mark the world build and configuration phase complete
+    (window as any).worldReady = true;
 
     // Warm up WebGL shader context on the fly
     (window as any).shadersCompiled = false;
@@ -496,7 +577,18 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
       isUnmounted = true;
       cancelAnimationFrame(animationId);
       resizeObs.disconnect();
-      renderer.dispose();
+      
+      // Clean up event listeners on our persistent canvas
+      if (globalCanvas) {
+        globalCanvas.removeEventListener('webglcontextlost', handleContextLost);
+        globalCanvas.removeEventListener('webglcontextrestored', handleContextRestored);
+        
+        // Dynamic DOM re-parenting: swap out canvas elegantly
+        if (globalCanvas.parentNode === containerRef.current) {
+          containerRef.current.removeChild(globalCanvas);
+        }
+      }
+
       reflectionTex.dispose();
 
       // System Disposals representing clean lifecycle hooks
@@ -529,8 +621,25 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
       // Clear static singletons to prevent memory leaks and recreate cleanly next time
       lodManager.clear();
       terrainManager.clear();
+
+      // Reset static initialization flags completely to allow a clean second mount
+      DragonTrackWorld.initialized = false;
+      CoastalSunsetTrackWorld.initialized = false;
+      ForestSystem.initialized = false;
+      TerrainManager.initialized = false;
+      ShaderPreloader.initialized = false;
+      ParticleSystem.initialized = false;
+      VehicleRenderer.initialized = false;
+      WeatherSystem.initialized = false;
+      AudioSystem.initialized = false;
+
+      (window as any).carLoaded = false;
+      (window as any).playerCarAddedToScene = false;
+      (window as any).mapLoaded = false;
+      (window as any).shadersCompiled = false;
+      (window as any).worldReady = false;
     };
-  }, [physicsService, trackHelper]);
+  }, [physicsService, trackHelper, contextKey]);
 
   return (
     <div 
@@ -551,24 +660,6 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
         border: 'none',
       }}
     >
-      <canvas 
-        ref={canvasRef} 
-        className="block"
-        style={{
-          position: "fixed",
-          inset: 0,
-          width: "100vw",
-          height: "100dvh",
-          display: "block",
-          margin: 0,
-          padding: 0,
-          borderRadius: 0,
-          maxWidth: "none",
-          outline: 'none',
-          border: 'none',
-        }}
-      />
-      
       {/* Cinematic Sunset Lens flares */}
       <div ref={flareRef} className="pointer-events-none absolute inset-0 z-10 transition-opacity duration-300 opacity-0">
         <div className="absolute w-28 h-28 rounded-full bg-amber-400/30 blur-xl filter" />

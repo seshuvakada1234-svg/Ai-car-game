@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 
 export class WeatherSystem {
+  public static initialized = false;
   private scene: THREE.Scene;
   private renderer: THREE.WebGLRenderer | null = null;
 
@@ -9,6 +10,7 @@ export class WeatherSystem {
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
+    WeatherSystem.initialized = true;
   }
 
   public setRenderer(renderer: THREE.WebGLRenderer): void {

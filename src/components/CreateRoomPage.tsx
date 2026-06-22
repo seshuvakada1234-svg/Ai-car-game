@@ -12,7 +12,7 @@ export const CreateRoomPage: React.FC = () => {
 
   // Retrieve parameters passed from Garage Menu if any
   const state = location.state as { selectedCar?: string; selectedMap?: string } | null;
-  const car = state?.selectedCar || 'lamborghini';
+  const car = state?.selectedCar || 'ferrari';
   const map = state?.selectedMap || 'map1';
 
   useEffect(() => {

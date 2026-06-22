@@ -20,7 +20,6 @@ import { NormalRoomService, NormalRoom, NormalPlayer } from '../multiplayer/Norm
 import { RoomCodeGenerator } from '../multiplayer/RoomCodeGenerator';
 
 // Preview frames
-import lamboPreview from '../assets/images/lambo_garage_1781251735063.jpg';
 import ferrariPreview from '../assets/images/ferrari_garage_1781251750236.jpg';
 import bugattiPreview from '../assets/images/bugatti_garage_1781251768295.jpg';
 import porschePreview from '../assets/images/porsche_garage_1781251783563.jpg';
@@ -32,24 +31,6 @@ interface MenuProps {
 }
 
 const CARS_GARAGE = [
-  {
-    id: 'lamborghini' as const,
-    name: 'Lamborghini Aventador',
-    image: lamboPreview,
-    class: 'S CLASS',
-    topSpeed: 350,
-    acceleration: '2.9s',
-    handling: 85,
-    power: '720 HP',
-    stars: 5,
-    xp: 82,
-    oil: 95,
-    engine: 90,
-    chassis: 75,
-    desc: 'V12 naturally-aspirated aerodynamic monster with roaring track energy.',
-    colorPreset: '#ff5500',
-    scale: 0.85
-  },
   {
     id: 'ferrari' as const,
     name: 'Ferrari Purosangue',
@@ -107,7 +88,6 @@ const CARS_GARAGE = [
 ];
 
 const METALLIC_COLORS = [
-  { name: 'Speed Orange', hex: '#ff5500' },
   { name: 'Rosso Red', hex: '#ff003c' },
   { name: 'Nitro Green', hex: '#00ff3c' },
   { name: 'Hyper Blue', hex: '#00ccff' },
@@ -124,8 +104,8 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
   const [settingsDropdownOpen, setSettingsDropdownOpen] = useState(false);
 
   // Selected vehicle settings
-  const [selectedCar, setSelectedCar] = useState<'lamborghini' | 'ferrari' | 'bugatti' | 'porsche'>('lamborghini');
-  const [carColor, setCarColor] = useState('#ff5500');
+  const [selectedCar, setSelectedCar] = useState<'ferrari' | 'bugatti' | 'porsche'>('ferrari');
+  const [carColor, setCarColor] = useState('#ff003c');
   const [selectedMap, setSelectedMap] = useState<'map1' | 'map2'>('map1');
   const [playerName, setPlayerName] = useState(profile?.name || 'Speedster');
   const [difficulty, setDifficulty] = useState<Difficulty>('medium');
@@ -378,8 +358,7 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
       carGroupRef.current = null;
     }
 
-    const modelKey = selectedCar === 'lamborghini' ? 'lamborghini_aventador' :
-                     selectedCar === 'ferrari' ? 'ferrari_purosangue' :
+    const modelKey = selectedCar === 'ferrari' ? 'ferrari_purosangue' :
                      selectedCar === 'bugatti' ? 'bugatti_chiron_top_edition' :
                      'porsche_911_gt3';
 
@@ -427,8 +406,7 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
           selectedMap
         };
 
-        const modelKey = selectedCar === 'lamborghini' ? 'lamborghini_aventador' :
-                         selectedCar === 'ferrari' ? 'ferrari_purosangue' :
+        const modelKey = selectedCar === 'ferrari' ? 'ferrari_purosangue' :
                          selectedCar === 'bugatti' ? 'bugatti_chiron_top_edition' :
                          'porsche_911_gt3';
         setPlayerSelectedModelKey(modelKey);
@@ -793,7 +771,7 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
             <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
               <div 
                 className="h-full bg-gradient-to-r from-orange-600 to-amber-400 shadow-[0_0_8px_orange]"
-                style={{ width: selectedCar === 'bugatti' ? '100%' : selectedCar === 'lamborghini' ? '90%' : '80%' }}
+                style={{ width: selectedCar === 'bugatti' ? '100%' : '80%' }}
               />
             </div>
           </div>
@@ -1241,7 +1219,7 @@ export const Menu: React.FC<MenuProps> = ({ onStartGame, onCreateRoom, onJoinRoo
                     const loadedPlayer = syncedPlayers[idx];
                     if (loadedPlayer) {
                       const isMe = profile && loadedPlayer.uid === profile.uid;
-                      const currentCarId = syncedRoom?.selectedCar || 'lamborghini';
+                      const currentCarId = syncedRoom?.selectedCar || 'ferrari';
                       const details = CARS_GARAGE.find(c => c.id === currentCarId);
                       return (
                         <div 

@@ -55,8 +55,8 @@ export class GamePhysicsService {
   }
 
   public initializeCars(playerName: string, difficulty: Difficulty, playerCarColor: string): CarState[] {
-    const aiColors = ['#ff053c', '#ffe105', '#00f6ff', '#ffa200', '#bebebe'];
-    const aiNames = ['Apex', 'Nova', 'Phantom', 'Titan', 'Shadow'];
+    const aiColors = ['#ffe105', '#00f6ff', '#ffa200'];
+    const aiNames = ['Nova', 'Phantom', 'Titan'];
     const result: CarState[] = [];
 
     this.carProgressHistory.clear();
@@ -101,10 +101,17 @@ export class GamePhysicsService {
       aiTargetNode: 0,
       aiSpeedFactor: 1,
       aiAggression: 0.5,
+      throttle: 0,
+      brake: 0,
+      steering: 0,
+      gear: 'D',
+      awake: true,
+      mass: 1450,
+      engineRunning: true,
     });
 
-    // 2. Setup exactly 5 competitive AI Competitors (8m spacing between cars)
-    for (let i = 0; i < 5; i++) {
+    // 2. Setup exactly 3 competitive AI Competitors (8m spacing between cars)
+    for (let i = 0; i < 3; i++) {
       const side = (i % 2 === 0) ? 1 : -1;
       const aiDistance = 15.0 + (i + 1) * 8.0;
       const aiProgress = ((1.0 - aiDistance / curveLength) % 1.0 + 1.0) % 1.0;
@@ -154,6 +161,13 @@ export class GamePhysicsService {
         aiSpeedFactor: speedFactor + (Math.random() * 0.04 - 0.02),
         aiAggression: aggression,
         stuckTimer: 0,
+        throttle: 0,
+        brake: 0,
+        steering: 0,
+        gear: 'D',
+        awake: true,
+        mass: 1450,
+        engineRunning: true,
       });
     }
 
@@ -239,7 +253,45 @@ export class GamePhysicsService {
       }
     }
 
+    // Failsafe mechanism for stalled/stuck cars (speed stays 0 for 3 seconds under throttle)
+    if (controls.forward && Math.abs(car.speed) < 0.1) {
+      if ((car as any).stuckSpeedZeroTimer === undefined) {
+        (car as any).stuckSpeedZeroTimer = 0;
+      }
+      (car as any).stuckSpeedZeroTimer += dt;
+      if ((car as any).stuckSpeedZeroTimer >= 3.0) {
+        car.awake = true;
+        car.mass = 1450;
+        car.engineRunning = true;
+        car.gear = 'D';
+        controls.gear = 'D';
+        controls.forward = true;
+        controls.backward = false;
+        
+        // Immediate physical kick to reset constraints
+        car.speed = 12.0;
+        const forwardX = Math.sin(car.angle);
+        const forwardZ = Math.cos(car.angle);
+        car.velocity.x = forwardX * car.speed;
+        car.velocity.z = forwardZ * car.speed;
+        
+        (car as any).stuckSpeedZeroTimer = 0;
+      }
+    } else {
+      (car as any).stuckSpeedZeroTimer = 0;
+    }
+
     const currentGear = controls.gear || 'D';
+    
+    // Write out live telemetry onto vehicle object for debug overlay and displays
+    car.gear = currentGear;
+    car.throttle = controls.forward ? 1.0 : 0.0;
+    car.brake = controls.backward ? 1.0 : 0.0;
+    car.steering = car.steerValue || 0;
+    car.awake = true; // vehicle is active/awake
+    car.mass = car.mass || 1450;
+    car.engineRunning = true;
+
     const topSpeed = car.isNitroActive ? NITRO_BOOST_SPEED : MAX_SPEED;
     const accelRate = car.isNitroActive ? NITRO_BOOST_ACCEL : ACCELERATION;
     const speedRatio = Math.abs(car.speed) / topSpeed;

@@ -21,6 +21,8 @@ THREE.Mesh.prototype.raycast = function(this: THREE.Mesh, raycaster, intersects)
 
 export class TerrainManager {
   private static instance: TerrainManager | null = null;
+  public static initialized = false;
+
   private heightCache: Float32Array;
   private minX = -3000;
   private maxX = 3000;
@@ -55,6 +57,11 @@ export class TerrainManager {
    * Generates and freezes the heightmap cache once, completely removing runtime noise evaluation.
    */
   public initialize(trackHelper: TrackGeometryHelper): void {
+    if (TerrainManager.initialized) {
+      console.log('TerrainManager: Already initialized. Skipping heightbaking.');
+      return;
+    }
+    TerrainManager.initialized = true;
     this.trackHelper = trackHelper;
     console.time('TerrainManager Heightmap Baking');
     for (let r = 0; r < this.rows; r++) {
@@ -212,6 +219,7 @@ export class TerrainManager {
   }
 
   public clear(): void {
+    TerrainManager.initialized = false;
     if (this.roadBVHMesh) {
       this.roadBVHMesh.geometry.dispose();
       if (Array.isArray(this.roadBVHMesh.material)) {

@@ -2,10 +2,12 @@ import * as THREE from 'three';
 import { particleSystem } from '../world/particleSystem';
 
 export class ParticleSystem {
+  public static initialized = false;
   private scene: THREE.Scene;
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
+    ParticleSystem.initialized = true;
     this.initialize();
   }
 

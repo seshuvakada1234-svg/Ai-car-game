@@ -115,10 +115,13 @@ export class EngineSoundSystem {
 }
 
 export class AudioSystem {
+  public static initialized = false;
   public engineSynth = new EngineSoundSystem();
   public sampleAudio: CarAudioSystem | null = null;
 
-  constructor() {}
+  constructor() {
+    AudioSystem.initialized = true;
+  }
 
   /**
    * Translates real-time speeds and telemetry filters to procedural oscillators.

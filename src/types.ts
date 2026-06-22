@@ -58,6 +58,15 @@ export interface CarState {
   aiAggression: number;
   stuckTimer: number;
   lastRecoveryTime?: number;
+
+  // Control & Pipeline State
+  throttle?: number;
+  brake?: number;
+  steering?: number;
+  gear?: 'P' | 'R' | 'N' | 'D';
+  awake?: boolean;
+  mass?: number;
+  engineRunning?: boolean;
 }
 
 export interface Checkpoint {
@@ -77,7 +86,7 @@ export interface GameSettings {
   playerName: string;
   difficulty: Difficulty;
   carColor: string;
-  selectedCar: 'lamborghini' | 'ferrari' | 'bugatti' | 'porsche';
+  selectedCar: 'ferrari' | 'bugatti' | 'porsche';
   selectedMap?: 'map1' | 'map2';
 }
 

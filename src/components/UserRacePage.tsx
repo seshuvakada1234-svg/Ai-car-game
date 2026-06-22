@@ -38,6 +38,7 @@ export const UserRacePage: React.FC = () => {
     left: false,
     right: false,
     nitro: false,
+    gear: 'D',
   });
 
   const trackHelperRef = useRef<TrackGeometryHelper | null>(null);
@@ -159,49 +160,6 @@ export const UserRacePage: React.FC = () => {
     }, 10);
 
     return () => clearInterval(interval);
-  }, [phase, isPaused]);
-
-  // 4. Keyboard Controls Hook
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (phase !== 'racing' || isPaused) return;
-
-      const key = e.key.toLowerCase();
-      if (key === 'w' || e.key === 'ArrowUp') {
-        setControls((prev) => ({ ...prev, forward: true }));
-      } else if (key === 's' || e.key === 'ArrowDown') {
-        setControls((prev) => ({ ...prev, backward: true }));
-      } else if (key === 'a' || e.key === 'ArrowLeft') {
-        setControls((prev) => ({ ...prev, left: true }));
-      } else if (key === 'd' || e.key === 'ArrowRight') {
-        setControls((prev) => ({ ...prev, right: true }));
-      } else if (e.key === ' ') {
-        setControls((prev) => ({ ...prev, nitro: true }));
-      }
-    };
-
-    const handleKeyUp = (e: KeyboardEvent) => {
-      const key = e.key.toLowerCase();
-      if (key === 'w' || e.key === 'ArrowUp') {
-        setControls((prev) => ({ ...prev, forward: false }));
-      } else if (key === 's' || e.key === 'ArrowDown') {
-        setControls((prev) => ({ ...prev, backward: false }));
-      } else if (key === 'a' || e.key === 'ArrowLeft') {
-        setControls((prev) => ({ ...prev, left: false }));
-      } else if (key === 'd' || e.key === 'ArrowRight') {
-        setControls((prev) => ({ ...prev, right: false }));
-      } else if (e.key === ' ') {
-        setControls((prev) => ({ ...prev, nitro: false }));
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    };
   }, [phase, isPaused]);
 
   // 5. requestAnimationFrame frame tick sync

@@ -52,6 +52,254 @@ import { RaceLoadingScreen } from './components/RaceLoadingScreen';
 import { db } from './lib/firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 
+interface RacingCanvasUnitProps {
+  settings: GameSettings | null;
+  phase: GamePhase;
+  timeOfDay: 'morning' | 'noon' | 'sunset' | 'night';
+  setTimeOfDay: React.Dispatch<React.SetStateAction<'morning' | 'noon' | 'sunset' | 'night'>>;
+  weather: 'sunny' | 'cloudy' | 'foggy' | 'rain';
+  setWeather: React.Dispatch<React.SetStateAction<'sunny' | 'cloudy' | 'foggy' | 'rain'>>;
+  trackHelper: TrackGeometryHelper | null;
+  physicsService: GamePhysicsService | null;
+  cars: CarState[];
+  controls: ControlsState;
+  setControls: React.Dispatch<React.SetStateAction<ControlsState>>;
+  isPaused: boolean;
+  setIsPaused: React.Dispatch<React.SetStateAction<boolean>>;
+  soundEnabled: boolean;
+  countdownMsg: string;
+  elapsedTime: number;
+  handleRaceFinish: () => void;
+  handleTickUpdate: (updatedCars: CarState[]) => void;
+  handleRestartRace: () => void;
+  handleHomeMenu: () => void;
+  handleNextRace: () => void;
+  mp: any;
+}
+
+const RacingCanvasUnit: React.FC<RacingCanvasUnitProps> = ({
+  settings,
+  phase,
+  timeOfDay,
+  setTimeOfDay,
+  weather,
+  setWeather,
+  trackHelper,
+  physicsService,
+  cars,
+  controls,
+  setControls,
+  isPaused,
+  setIsPaused,
+  soundEnabled,
+  countdownMsg,
+  elapsedTime,
+  handleRaceFinish,
+  handleTickUpdate,
+  handleRestartRace,
+  handleHomeMenu,
+  handleNextRace,
+  mp,
+}) => {
+  const navigate = useNavigate();
+  const { checking, allReady, checkStatus } = useAssetStatus();
+
+  useEffect(() => {
+    // If we directly hit /race but haven't initialized settings, redirect back
+    if (!settings) {
+      navigate('/garage');
+    }
+  }, [settings, navigate]);
+
+  if (checking) {
+    return (
+      <div className="fixed inset-0 bg-slate-950 flex flex-col items-center justify-center font-sans text-white z-50">
+        <div className="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full mb-4 animate-spin" />
+        <p className="text-slate-400 font-mono tracking-wider text-xs uppercase animate-pulse">
+          Verifying Live Racing Assets...
+        </p>
+      </div>
+    );
+  }
+
+  if (!allReady) {
+    return (
+      <div className="fixed inset-0 bg-slate-950 z-50">
+        <AssetInstallScreen onComplete={async () => {
+          await checkStatus();
+        }} />
+      </div>
+    );
+  }
+
+  const currentPl = cars.find(c => c.id === 'player') || cars[0];
+  const currentOpponents = cars.filter(c => c.id !== 'player' && !c.id.startsWith('traffic'));
+
+  return (
+    <div 
+      id="ai-race-root" 
+      className="fixed top-0 left-0 w-screen h-[100dvh] overflow-hidden bg-black flex flex-col m-0 p-0 rounded-none max-w-none select-none"
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        width: '100vw',
+        height: '100dvh',
+        overflow: 'hidden',
+        background: 'black',
+        margin: 0,
+        padding: 0,
+        borderRadius: 0,
+        maxWidth: 'none',
+      }}
+    >
+      {/* Info panel */}
+      <div className="absolute top-4 left-4 z-20 pointer-events-none flex items-center space-x-2 text-white bg-slate-950/40 backdrop-blur-sm px-3 py-1 rounded-full border border-slate-800/40 opacity-72">
+        <Compass className="w-3.5 h-3.5 text-blue-400 rotate-45" />
+        <span className="font-sans font-black text-[10px] tracking-wider uppercase">AI RACE ARENA <span className="text-[#00f2ffa5]">LIVE</span></span>
+      </div>
+
+      {/* Environment controller panel (sunny, night, cloudy, etc.) */}
+      {phase !== 'completed' && (
+        <div className="absolute top-4 right-4 z-30 flex flex-col items-end space-y-1.5 select-none scale-90 origin-top-right md:scale-100">
+          <div className="bg-slate-950/75 border border-slate-800/60 backdrop-blur-md p-1.5 px-2.5 rounded-2xl flex items-center space-x-4 text-white shadow-2xl">
+            <div className="flex items-center space-x-1 bg-slate-900/40 p-0.5 rounded-xl border border-slate-800/30">
+              <span className="text-[7.5px] font-black tracking-widest uppercase text-slate-400 px-1.5">TIME</span>
+              {(['morning', 'noon', 'sunset', 'night'] as const).map(t => (
+                <button
+                  key={t}
+                  onClick={() => setTimeOfDay(t)}
+                  className={`px-2 py-0.5 rounded-lg text-[8.5px] font-black uppercase tracking-wider transition-all border ${
+                    timeOfDay === t
+                      ? 'bg-sky-500/20 border-sky-500/60 text-sky-300 shadow-[0_0_8px_rgba(56,189,248,0.2)]'
+                      : 'border-transparent text-slate-400 hover:text-white hover:bg-slate-800/20'
+                  }`}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center space-x-1 bg-slate-900/40 p-0.5 rounded-xl border border-slate-800/30">
+              <span className="text-[7.5px] font-black tracking-widest uppercase text-emerald-400 px-1.5">WEATHER</span>
+              {(['sunny', 'cloudy', 'foggy', 'rain'] as const).map(w => (
+                <button
+                  key={w}
+                  onClick={() => setWeather(w)}
+                  className={`px-2 py-0.5 rounded-lg text-[8.5px] font-black uppercase tracking-wider transition-all border ${
+                    weather === w
+                      ? 'bg-emerald-500/20 border-emerald-500/60 text-emerald-300 shadow-[0_0_8px_rgba(52,211,153,0.2)]'
+                      : 'border-transparent text-slate-400 hover:text-white hover:bg-slate-800/20'
+                  }`}
+                >
+                  {w}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Three.js interactive Canvas component */}
+      {trackHelper && physicsService && cars.length > 0 && (
+        <GameCanvas
+          cars={cars}
+          playerControls={controls}
+          physicsService={physicsService}
+          trackHelper={trackHelper}
+          isPaused={isPaused}
+          gameState={phase}
+          onFinishRace={handleRaceFinish}
+          onTick={handleTickUpdate}
+          soundEnabled={soundEnabled}
+          timeOfDay={timeOfDay}
+          weather={weather}
+        />
+      )}
+
+      {/* HUD and dashboard overlays */}
+      {phase === 'racing' && currentPl && (
+        <HUD
+          player={currentPl}
+          opponents={currentOpponents}
+          controls={controls}
+          setControls={setControls}
+          elapsedTime={elapsedTime}
+          trackHelper={trackHelper}
+          onPauseToggle={() => setIsPaused(prev => !prev)}
+          isPaused={isPaused}
+        />
+      )}
+
+      {/* Room multiplayer headers */}
+      {mp.room && (phase === 'racing' || phase === 'countdown') && (
+        <RoomCodeHUD
+          roomCode={mp.room.code}
+          playersCount={mp.room.players.length}
+          isLiveMode={mp.room.isLiveMode}
+        />
+      )}
+
+      {/* GameOver celebration statistics and leaderboards link */}
+      {phase === 'completed' && currentPl && (
+        <GameOver
+          player={currentPl}
+          opponents={currentOpponents}
+          elapsedTime={elapsedTime}
+          onRestart={async () => {
+            if (mp.room) {
+              if (mp.room.hostId === mp.playerId) {
+                mp.startRaceNow();
+              }
+            } else {
+              handleRestartRace();
+            }
+          }}
+          onHome={() => {
+            if (mp.room) {
+              mp.leaveRoom();
+            }
+            handleHomeMenu();
+          }}
+          onNextRace={mp.room ? undefined : handleNextRace}
+        />
+      )}
+
+      {/* Cinematic countdown elements */}
+      {phase === 'countdown' && (
+        <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-slate-950/40 pointer-events-none select-none">
+          <div className="bg-slate-900/84 border border-slate-700/60 backdrop-blur-md px-10 py-8 rounded-3xl flex flex-col items-center min-w-[200px] animate-bounce">
+            <span className="text-[12px] font-black text-slate-400 tracking-widest uppercase">Grid Light</span>
+            <span className={`text-6xl font-black font-sans mt-3 text-transparent bg-clip-text ${
+              countdownMsg === 'GO!' 
+                ? 'bg-gradient-to-r from-emerald-400 to-teal-300 scale-110' 
+                : 'bg-gradient-to-r from-amber-400 to-red-400'
+            }`}>
+              {countdownMsg}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Pause Overlay banner */}
+      {isPaused && phase === 'racing' && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-950/72 backdrop-blur-xs">
+          <div className="bg-slate-900 border border-slate-800 p-8 rounded-3xl text-center shadow-2xl max-w-sm space-y-4">
+            <h3 className="text-2xl font-black uppercase text-slate-200 tracking-wider">Race Suspended</h3>
+            <p className="text-xs text-slate-400">Your engine is idling at the pits. Click to resume tracking racing line.</p>
+            <button
+              onClick={() => setIsPaused(false)}
+              className="px-8 py-3 bg-blue-600 hover:bg-blue-500 text-white font-extrabold uppercase text-xs tracking-widest rounded-xl transition duration-150 cursor-pointer w-full"
+            >
+              Resume Race
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 function AppBody() {
   // Navigation
   const navigate = useNavigate();
@@ -72,7 +320,7 @@ function AppBody() {
   // Staging join model overlay
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [multiplayerCachedSettings, setMultiplayerCachedSettings] = useState<GameSettings | null>(null);
-  const [playerSelectedModelKey, setPlayerSelectedModelKeyLocal] = useState<string>('lamborghini_aventador');
+  const [playerSelectedModelKey, setPlayerSelectedModelKeyLocal] = useState<string>('ferrari_purosangue');
 
   // Dynamic Environment Settings
   const [timeOfDay, setTimeOfDay] = useState<'morning' | 'noon' | 'sunset' | 'night'>('sunset');
@@ -88,6 +336,7 @@ function AppBody() {
     left: false,
     right: false,
     nitro: false,
+    gear: 'D',
   });
 
   // Sound preference state
@@ -109,40 +358,6 @@ function AppBody() {
     physicsServiceRef.current = new GamePhysicsService(helper);
   }, []);
 
-  // Keyboard controls listeners
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (phase !== 'racing' || isPaused) return;
-
-      const key = e.key.toLowerCase();
-      if (key === 'a' || e.key === 'ArrowLeft') {
-        setControls(prev => ({ ...prev, left: true }));
-      } else if (key === 'd' || e.key === 'ArrowRight') {
-        setControls(prev => ({ ...prev, right: true }));
-      } else if (e.key === ' ') {
-        setControls(prev => ({ ...prev, nitro: true }));
-      }
-    };
-
-    const handleKeyUp = (e: KeyboardEvent) => {
-      const key = e.key.toLowerCase();
-      if (key === 'a' || e.key === 'ArrowLeft') {
-        setControls(prev => ({ ...prev, left: false }));
-      } else if (key === 'd' || e.key === 'ArrowRight') {
-        setControls(prev => ({ ...prev, right: false }));
-      } else if (e.key === ' ') {
-        setControls(prev => ({ ...prev, nitro: false }));
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    };
-  }, [phase, isPaused]);
-
   // General countdown clock loop sequence
   useEffect(() => {
     let timerId = 0;
@@ -152,14 +367,13 @@ function AppBody() {
 
       const startTime = Date.now();
       const tickCountdown = () => {
-        if (Date.now() - startTime > 15000) {
-          console.warn('Warming engine limit reached (15 seconds timeout). Instantly starting countdown.');
-          (window as any).playerCarAddedToScene = true;
-          (window as any).shadersCompiled = true;
-        }
+        const carLoaded = !!(window as any).carLoaded || !!(window as any).playerCarAddedToScene;
+        const mapLoaded = !!(window as any).mapLoaded;
+        const shadersCompiled = !!(window as any).shadersCompiled;
+        const worldReady = !!(window as any).worldReady;
 
-        if (!(window as any).playerCarAddedToScene || !(window as any).shadersCompiled) {
-          console.log('Waiting for player vehicle and shader compile completion...');
+        if (!carLoaded || !mapLoaded || !shadersCompiled || !worldReady) {
+          console.log('Waiting for engine startup assets to load...', { carLoaded, mapLoaded, shadersCompiled, worldReady });
           setCountdownMsg('WARMING ENGINE...');
           return;
         }
@@ -227,8 +441,7 @@ function AppBody() {
     setIsPaused(false);
 
     // Apply exact player selected vehicle key
-    const modelKey = cfg.selectedCar === 'lamborghini' ? 'lamborghini_aventador' :
-                      cfg.selectedCar === 'ferrari' ? 'ferrari_purosangue' :
+    const modelKey = cfg.selectedCar === 'ferrari' ? 'ferrari_purosangue' :
                       cfg.selectedCar === 'bugatti' ? 'bugatti_chiron_top_edition' :
                       'porsche_911_gt3';
     setPlayerSelectedModelKey(modelKey);
@@ -311,15 +524,14 @@ function AppBody() {
       playerName: localRacer?.name || 'Local Player',
       difficulty: activeRoom.difficulty || 'medium',
       carColor: localRacer?.carColor || '#0062ff',
-      selectedCar: localRacer?.selectedCar || 'lamborghini',
+      selectedCar: (localRacer?.selectedCar || 'ferrari') as any,
       selectedMap: activeMap
     };
     setSettings(cfg);
     setElapsedTime(0);
     setIsPaused(false);
 
-    const modelKey = cfg.selectedCar === 'lamborghini' ? 'lamborghini_aventador' :
-                      cfg.selectedCar === 'ferrari' ? 'ferrari_purosangue' :
+    const modelKey = cfg.selectedCar === 'ferrari' ? 'ferrari_purosangue' :
                       cfg.selectedCar === 'bugatti' ? 'bugatti_chiron_top_edition' :
                       'porsche_911_gt3';
     setPlayerSelectedModelKey(modelKey);
@@ -473,7 +685,7 @@ function AppBody() {
       try {
         await addDoc(collection(db, 'leaderboards'), {
           playerName: profile?.name || currentPl.name || 'Anonymous Racer',
-          selectedCar: settings?.selectedCar || 'lamborghini',
+          selectedCar: settings?.selectedCar || 'ferrari',
           topSpeed: Math.floor(currentPl.speed * 3.6) || 280,
           createdAt: serverTimestamp()
         });
@@ -485,205 +697,6 @@ function AppBody() {
 
   const currentPl = cars.find(c => c.id === 'player') || cars[0];
   const currentOpponents = cars.filter(c => c.id !== 'player' && !c.id.startsWith('traffic'));
-
-  // ───────────────────────────────────────────────────────────────────────────
-  // THE COMPREHENSIVE RACING VIEW RENDER (FULLSCREEN HUD + canvas mesh)
-  // ───────────────────────────────────────────────────────────────────────────
-  const RacingCanvasUnit = () => {
-    const { checking, allReady, checkStatus } = useAssetStatus();
-
-    useEffect(() => {
-      // If we directly hit /race but haven't initialized settings, redirect back
-      if (!settings) {
-        navigate('/garage');
-      }
-    }, [settings]);
-
-    if (checking) {
-      return (
-        <div className="fixed inset-0 bg-slate-950 flex flex-col items-center justify-center font-sans text-white z-50">
-          <div className="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full mb-4 animate-spin" />
-          <p className="text-slate-400 font-mono tracking-wider text-xs uppercase animate-pulse">
-            Verifying Live Racing Assets...
-          </p>
-        </div>
-      );
-    }
-
-    if (!allReady) {
-      return (
-        <div className="fixed inset-0 bg-slate-950 z-50">
-          <AssetInstallScreen onComplete={async () => {
-            await checkStatus();
-          }} />
-        </div>
-      );
-    }
-
-    return (
-      <div 
-        id="ai-race-root" 
-        className="fixed top-0 left-0 w-screen h-[100dvh] overflow-hidden bg-black flex flex-col m-0 p-0 rounded-none max-w-none select-none"
-        style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          width: '100vw',
-          height: '100dvh',
-          overflow: 'hidden',
-          background: 'black',
-          margin: 0,
-          padding: 0,
-          borderRadius: 0,
-          maxWidth: 'none',
-        }}
-      >
-        {/* Info panel */}
-        <div className="absolute top-4 left-4 z-20 pointer-events-none flex items-center space-x-2 text-white bg-slate-950/40 backdrop-blur-sm px-3 py-1 rounded-full border border-slate-800/40 opacity-72">
-          <Compass className="w-3.5 h-3.5 text-blue-400 rotate-45" />
-          <span className="font-sans font-black text-[10px] tracking-wider uppercase">AI RACE ARENA <span className="text-[#00f2ffa5]">LIVE</span></span>
-        </div>
-
-        {/* Environment controller panel (sunny, night, cloudy, etc.) */}
-        {phase !== 'completed' && (
-          <div className="absolute top-4 right-4 z-30 flex flex-col items-end space-y-1.5 select-none scale-90 origin-top-right md:scale-100">
-            <div className="bg-slate-950/75 border border-slate-800/60 backdrop-blur-md p-1.5 px-2.5 rounded-2xl flex items-center space-x-4 text-white shadow-2xl">
-              <div className="flex items-center space-x-1 bg-slate-900/40 p-0.5 rounded-xl border border-slate-800/30">
-                <span className="text-[7.5px] font-black tracking-widest uppercase text-slate-400 px-1.5">TIME</span>
-                {(['morning', 'noon', 'sunset', 'night'] as const).map(t => (
-                  <button
-                    key={t}
-                    onClick={() => setTimeOfDay(t)}
-                    className={`px-2 py-0.5 rounded-lg text-[8.5px] font-black uppercase tracking-wider transition-all border ${
-                      timeOfDay === t
-                        ? 'bg-sky-500/20 border-sky-500/60 text-sky-300 shadow-[0_0_8px_rgba(56,189,248,0.2)]'
-                        : 'border-transparent text-slate-400 hover:text-white hover:bg-slate-800/20'
-                    }`}
-                  >
-                    {t}
-                  </button>
-                ))}
-              </div>
-
-              <div className="flex items-center space-x-1 bg-slate-900/40 p-0.5 rounded-xl border border-slate-800/30">
-                <span className="text-[7.5px] font-black tracking-widest uppercase text-emerald-400 px-1.5">WEATHER</span>
-                {(['sunny', 'cloudy', 'foggy', 'rain'] as const).map(w => (
-                  <button
-                    key={w}
-                    onClick={() => setWeather(w)}
-                    className={`px-2 py-0.5 rounded-lg text-[8.5px] font-black uppercase tracking-wider transition-all border ${
-                      weather === w
-                        ? 'bg-emerald-500/20 border-emerald-500/60 text-emerald-300 shadow-[0_0_8px_rgba(52,211,153,0.2)]'
-                        : 'border-transparent text-slate-400 hover:text-white hover:bg-slate-800/20'
-                    }`}
-                  >
-                    {w}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Three.js interactive Canvas component */}
-        {trackHelperRef.current && physicsServiceRef.current && cars.length > 0 && (
-          <GameCanvas
-            cars={cars}
-            playerControls={controls}
-            physicsService={physicsServiceRef.current}
-            trackHelper={trackHelperRef.current}
-            isPaused={isPaused}
-            gameState={phase}
-            onFinishRace={handleRaceFinish}
-            onTick={handleTickUpdate}
-            soundEnabled={soundEnabled}
-            timeOfDay={timeOfDay}
-            weather={weather}
-          />
-        )}
-
-        {/* HUD and dashboard overlays */}
-        {phase === 'racing' && currentPl && (
-          <HUD
-            player={currentPl}
-            opponents={currentOpponents}
-            controls={controls}
-            setControls={setControls}
-            elapsedTime={elapsedTime}
-            trackHelper={trackHelperRef.current!}
-            onPauseToggle={() => setIsPaused(prev => !prev)}
-            isPaused={isPaused}
-          />
-        )}
-
-        {/* Room multiplayer headers */}
-        {mp.room && (phase === 'racing' || phase === 'countdown') && (
-          <RoomCodeHUD
-            roomCode={mp.room.code}
-            playersCount={mp.room.players.length}
-            isLiveMode={mp.room.isLiveMode}
-          />
-        )}
-
-        {/* GameOver celebration statistics and leaderboards link */}
-        {phase === 'completed' && currentPl && (
-          <GameOver
-            player={currentPl}
-            opponents={currentOpponents}
-            elapsedTime={elapsedTime}
-            onRestart={async () => {
-              if (mp.room) {
-                if (mp.room.hostId === mp.playerId) {
-                  mp.startRaceNow();
-                }
-              } else {
-                handleRestartRace();
-              }
-            }}
-            onHome={() => {
-              if (mp.room) {
-                mp.leaveRoom();
-              }
-              handleHomeMenu();
-            }}
-            onNextRace={mp.room ? undefined : handleNextRace}
-          />
-        )}
-
-        {/* Cinematic countdown elements */}
-        {phase === 'countdown' && (
-          <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-slate-950/40 pointer-events-none select-none">
-            <div className="bg-slate-900/84 border border-slate-700/60 backdrop-blur-md px-10 py-8 rounded-3xl flex flex-col items-center min-w-[200px] animate-bounce">
-              <span className="text-[12px] font-black text-slate-400 tracking-widest uppercase">Grid Light</span>
-              <span className={`text-6xl font-black font-sans mt-3 text-transparent bg-clip-text ${
-                countdownMsg === 'GO!' 
-                  ? 'bg-gradient-to-r from-emerald-400 to-teal-300 scale-110' 
-                  : 'bg-gradient-to-r from-amber-400 to-red-400'
-              }`}>
-                {countdownMsg}
-              </span>
-            </div>
-          </div>
-        )}
-
-        {/* Pause Overlay banner */}
-        {isPaused && phase === 'racing' && (
-          <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-950/72 backdrop-blur-xs">
-            <div className="bg-slate-900 border border-slate-800 p-8 rounded-3xl text-center shadow-2xl max-w-sm space-y-4">
-              <h3 className="text-2xl font-black uppercase text-slate-200 tracking-wider">Race Suspended</h3>
-              <p className="text-xs text-slate-400">Your engine is idling at the pits. Click to resume tracking racing line.</p>
-              <button
-                onClick={() => setIsPaused(false)}
-                className="px-8 py-3 bg-blue-600 hover:bg-blue-500 text-white font-extrabold uppercase text-xs tracking-widest rounded-xl transition duration-150 cursor-pointer w-full"
-              >
-                Resume Race
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  };
 
   if (showSplash) {
     return <SplashScreen onComplete={() => setShowSplash(false)} />;
@@ -773,7 +786,7 @@ function AppBody() {
                       If another player or broadcaster has created a multiplayer game session, retrieve the 6-digit invitation Room Code and enter it to jump straight on the line up!
                     </p>
                     <button
-                      onClick={() => handleJoinRoom({ playerName: profile?.name || 'Racer Handle', difficulty: 'medium', carColor: '#00ccff', selectedCar: 'lamborghini', selectedMap: 'map1' })}
+                      onClick={() => handleJoinRoom({ playerName: profile?.name || 'Racer Handle', difficulty: 'medium', carColor: '#00ccff', selectedCar: 'ferrari', selectedMap: 'map1' })}
                       className="w-full py-4 bg-indigo-650 hover:bg-indigo-600 text-white font-black uppercase text-xs tracking-widest rounded-2xl transition shadow-[0_4px_18px_rgba(99,102,241,0.2)] cursor-pointer"
                     >
                       ENTER LOBBY CODE
@@ -816,7 +829,34 @@ function AppBody() {
         </ProtectedRoute>
       } />
 
-      <Route path="/race" element={<ProtectedRoute allowedRoles={['user', 'admin', 'broadcaster']}><RacingCanvasUnit /></ProtectedRoute>} />
+      <Route path="/race" element={
+        <ProtectedRoute allowedRoles={['user', 'admin', 'broadcaster']}>
+          <RacingCanvasUnit
+            settings={settings}
+            phase={phase}
+            timeOfDay={timeOfDay}
+            setTimeOfDay={setTimeOfDay}
+            weather={weather}
+            setWeather={setWeather}
+            trackHelper={trackHelperRef.current}
+            physicsService={physicsServiceRef.current}
+            cars={cars}
+            controls={controls}
+            setControls={setControls}
+            isPaused={isPaused}
+            setIsPaused={setIsPaused}
+            soundEnabled={soundEnabled}
+            countdownMsg={countdownMsg}
+            elapsedTime={elapsedTime}
+            handleRaceFinish={handleRaceFinish}
+            handleTickUpdate={handleTickUpdate}
+            handleRestartRace={handleRestartRace}
+            handleHomeMenu={handleHomeMenu}
+            handleNextRace={handleNextRace}
+            mp={mp}
+          />
+        </ProtectedRoute>
+      } />
       <Route path="/profile" element={<ProtectedRoute allowedRoles={['user', 'admin', 'broadcaster']}><DashboardLayout><UserProfilePage /></DashboardLayout></ProtectedRoute>} />
       <Route path="/leaderboard" element={<ProtectedRoute allowedRoles={['user', 'admin', 'broadcaster']}><DashboardLayout><UserLeaderboardPage /></DashboardLayout></ProtectedRoute>} />
 

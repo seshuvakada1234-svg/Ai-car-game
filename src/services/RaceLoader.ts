@@ -6,9 +6,10 @@
 import * as THREE from 'three';
 import { AssetManager } from './AssetManager';
 import { ShaderPreloader } from './ShaderPreloader';
-import { gltfModelCache } from '../world/procedural';
+import { gltfModelCache, GLTFMaterialsPBRSpecularGlossinessExtension } from '../world/procedural';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { applyGltfMaterialFix } from '../utils/gltfMaterialFix';
 
 export interface RaceLoaderProgress {
   stage: string;
@@ -32,10 +33,16 @@ export class RaceLoader {
     // 1. Load chosen car. Wait fully until loaded from direct storage verified files
     onProgress({ stage: 'Loading selected high-end supercar model...', percent: 35 });
     
-    const carMapKey = selectedCarId.includes('porsche') ? 'porsche_911_gt3' :
-                      selectedCarId.includes('ferrari') ? 'ferrari_purosangue' :
-                      selectedCarId.includes('bugatti') ? 'bugatti_chiron_top_edition' :
-                      'lamborghini_aventador';
+    let localCarId = selectedCarId;
+    if (localCarId.includes('lamborghini') || !localCarId || (!localCarId.includes('porsche') && !localCarId.includes('ferrari') && !localCarId.includes('bugatti'))) {
+      console.warn("lamborghini_aventador.glb removed - using fallback car.");
+      localCarId = 'ferrari';
+    }
+
+    const carMapKey = localCarId.includes('porsche') ? 'porsche_911_gt3' :
+                      localCarId.includes('ferrari') ? 'ferrari_purosangue' :
+                      localCarId.includes('bugatti') ? 'bugatti_chiron_top_edition' :
+                      'ferrari_purosangue';
 
     let localBlob = await AssetManager.getVerifiedBlob(carMapKey);
     if (!localBlob) {
@@ -61,10 +68,13 @@ export class RaceLoader {
         const dracoLoader = new DRACOLoader();
         dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
         loader.setDRACOLoader(dracoLoader);
+        loader.register((parser) => new GLTFMaterialsPBRSpecularGlossinessExtension(parser));
 
         await new Promise<void>((resolve, reject) => {
           loader.parse(buffer, '', (gltf) => {
+            applyGltfMaterialFix(gltf.scene);
             (gltfModelCache as any)[carMapKey] = gltf.scene;
+            gltfModelCache.isLoaded = true;
             dracoLoader.dispose();
             resolve();
           }, (err) => {
@@ -74,9 +84,11 @@ export class RaceLoader {
         });
       } catch (err) {
         console.warn(`RaceLoader: Parsed stored model fail for ${carMapKey}, utilizing beautiful procedural backups:`, err);
+        gltfModelCache.isLoaded = true;
       }
     } else {
       console.warn(`RaceLoader: Car asset not stored locally and stream failed, utilizing procedural geometry.`);
+      gltfModelCache.isLoaded = true;
     }
 
     onProgress({ stage: 'Preparing track environment structures...', percent: 65 });
