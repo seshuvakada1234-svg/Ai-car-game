@@ -72,8 +72,8 @@ export class GamePhysicsService {
     const playerNormal = new THREE.Vector3(-playerTangent.z, 0, playerTangent.x).normalize();
     const playerSpawnPos = playerPt.clone().addScaledVector(playerNormal, -2.5);
     
-    const playerRoadHeightTest = terrainManager.queryRoadHeight(playerSpawnPos);
-    const playerSpawnY = (playerRoadHeightTest !== null ? playerRoadHeightTest : playerPt.y) + wheelRadius;
+    const playerRoadHeightTest = terrainManager.getRoadHeight(playerSpawnPos);
+    const playerSpawnY = playerRoadHeightTest + wheelRadius;
     const playerStartAngle = Math.atan2(playerTangent.x, playerTangent.z);
 
     result.push({
@@ -121,8 +121,8 @@ export class GamePhysicsService {
       const aiOffsetValue = side * 2.5;
 
       const aiSpawnPos = aiPt.clone().addScaledVector(aiNormal, aiOffsetValue);
-      const groundY = terrainManager.queryRoadHeight(aiSpawnPos) ?? terrainManager.getHeight(aiSpawnPos.x, aiSpawnPos.z);
-      const aiSpawnY = groundY + 0.25;
+      const groundY = terrainManager.getRoadHeight(aiSpawnPos);
+      const aiSpawnY = groundY + wheelRadius;
       const aiStartAngle = Math.atan2(aiTangent.x, aiTangent.z);
 
       let speedFactor = 0.88;
@@ -177,10 +177,11 @@ export class GamePhysicsService {
   public recoverCarToNearestCheckpoint(car: CarState) {
     const now = Date.now();
     const lastRecovery = car.lastRecoveryTime || 0;
-    if (now - lastRecovery < 2000) {
+    if (now - lastRecovery < 5000) {
       return;
     }
     car.lastRecoveryTime = now;
+    car.recoveryCount = (car.recoveryCount || 0) + 1;
 
     const chpts = this.trackHelper.checkpoints;
     const chptIndex = car.currentCheckpointIndex >= 0 && car.currentCheckpointIndex < chpts.length ? car.currentCheckpointIndex : 0;
@@ -202,28 +203,87 @@ export class GamePhysicsService {
     car.angle = Math.atan2(chpt.direction.x, chpt.direction.z);
   }
 
+  private checkAndHandleRecovery(car: CarState, dt: number) {
+    const now = Date.now();
+    
+    // 1. Prevent: NaN, Infinity, undefined positions or velocities
+    const hasNan = !Number.isFinite(car.position.x) || !Number.isFinite(car.position.y) || !Number.isFinite(car.position.z) ||
+                   !Number.isFinite(car.velocity.x) || !Number.isFinite(car.velocity.y) || !Number.isFinite(car.velocity.z) ||
+                   !Number.isFinite(car.speed) || !Number.isFinite(car.angle) || !Number.isFinite(car.angularVelocity);
+    
+    if (hasNan) {
+      car.position.x = Number.isFinite(car.position.x) ? car.position.x : 0;
+      car.position.y = Number.isFinite(car.position.y) ? car.position.y : 0;
+      car.position.z = Number.isFinite(car.position.z) ? car.position.z : 0;
+      car.velocity.x = Number.isFinite(car.velocity.x) ? car.velocity.x : 0;
+      car.velocity.y = Number.isFinite(car.velocity.y) ? car.velocity.y : 0;
+      car.velocity.z = Number.isFinite(car.velocity.z) ? car.velocity.z : 0;
+      car.speed = Number.isFinite(car.speed) ? car.speed : 0;
+      car.angle = Number.isFinite(car.angle) ? car.angle : 0;
+      car.angularVelocity = Number.isFinite(car.angularVelocity) ? car.angularVelocity : 0;
+      
+      console.warn(`[RECOVERY] Healing vehicle ${car.id} due to NaN properties.`);
+      this.recoverCarToNearestCheckpoint(car);
+      return;
+    }
+
+    // 2. Map Bounds Check
+    if (Math.abs(car.position.x) > 3000 || car.position.z < -3000 || car.position.z > 4500) {
+      console.warn(`[RECOVERY] Healing vehicle ${car.id} because it drifted outside map bounds.`);
+      this.recoverCarToNearestCheckpoint(car);
+      return;
+    }
+
+    // 3. Distance from road calculation using TerrainManager
+    const roadY = terrainManager.getRoadHeight(car.position, car.lastValidY);
+    
+    // Save lastValidY if height is reasonable
+    if (Number.isFinite(roadY)) {
+      car.lastValidY = roadY;
+    }
+
+    const distFromRoad = Math.abs(car.position.y - roadY);
+    const isFallingOffMap = car.position.y < -50.0 || car.position.y < roadY - 15.0;
+    const isFloating = distFromRoad > 5.0 || isFallingOffMap;
+    
+    if (isFloating) {
+      if (car.floatTimer === undefined) {
+        car.floatTimer = 0;
+      }
+      car.floatTimer += dt;
+    } else {
+      car.floatTimer = 0;
+    }
+
+    // DEBUG LOGS REQUIREMENT
+    const lastRecTime = car.lastRecoveryTime || 0;
+    const cooldownRemaining = Math.max(0, 5000 - (now - lastRecTime)) / 1000;
+    
+    if (isFloating && car.floatTimer && car.floatTimer > 0.5 && Math.random() < 0.05) {
+      console.log(`[DEBUG LOG] Vehicle ID: ${car.id} | Pos: (${car.position.x.toFixed(1)}, ${car.position.y.toFixed(1)}, ${car.position.z.toFixed(1)}) | Road Height: ${roadY.toFixed(1)} | Dist: ${distFromRoad.toFixed(1)}m | VertVel: ${car.velocity.y.toFixed(1)} | RecCount: ${car.recoveryCount || 0} | Cooldown: ${cooldownRemaining.toFixed(1)}s`);
+    }
+
+    // Trigger Recovery only if floats > 5m for more than 2 seconds
+    if (isFloating && car.floatTimer >= 2.0) {
+      if (now - lastRecTime >= 5000) {
+        car.floatTimer = 0;
+        console.warn(`[RECOVERY] Recovering vehicle ${car.id} after floating/falling for > 2 seconds. Total recoveries: ${(car.recoveryCount || 0) + 1}`);
+        this.recoverCarToNearestCheckpoint(car);
+      } else {
+        // Under 5s cooldown, smoothly pull Y back to road height to avoid perpetual hovering
+        car.position.y = THREE.MathUtils.lerp(car.position.y, roadY, 5.0 * dt);
+        car.velocity.y = 0;
+      }
+    }
+  }
+
   public updateCar(car: CarState, dt: number, controls: ControlsState, isLocked: boolean) {
     dt = Math.min(dt, 0.05);
     if (!Number.isFinite(dt) || dt <= 0) {
       dt = 0.0166;
     }
 
-    if (!Number.isFinite(car.position.x) || !Number.isFinite(car.position.y) || !Number.isFinite(car.position.z) ||
-        !Number.isFinite(car.velocity.x) || !Number.isFinite(car.velocity.y) || !Number.isFinite(car.velocity.z) ||
-        !Number.isFinite(car.speed) || !Number.isFinite(car.angle) || !Number.isFinite(car.angularVelocity)) {
-      
-      if (!Number.isFinite(car.position.x)) car.position.x = 0;
-      if (!Number.isFinite(car.position.y)) car.position.y = 0;
-      if (!Number.isFinite(car.position.z)) car.position.z = 0;
-      if (!Number.isFinite(car.velocity.x)) car.velocity.x = 0;
-      if (!Number.isFinite(car.velocity.y)) car.velocity.y = 0;
-      if (!Number.isFinite(car.velocity.z)) car.velocity.z = 0;
-      if (!Number.isFinite(car.speed)) car.speed = 0;
-      if (!Number.isFinite(car.angle)) car.angle = 0;
-      if (!Number.isFinite(car.angularVelocity)) car.angularVelocity = 0;
-
-      this.recoverCarToNearestCheckpoint(car);
-    }
+    this.checkAndHandleRecovery(car, dt);
 
     if (car.isFinished) {
       car.speed *= 0.94;
@@ -238,19 +298,6 @@ export class GamePhysicsService {
       car.velocity = { x: 0, y: 0, z: 0 };
       car.isNitroActive = false;
       return;
-    }
-
-    const posCheckObj = GamePhysicsService._vecA.set(car.position.x, car.position.y, car.position.z);
-    const hasNan = isNaN(car.position.x) || isNaN(car.position.y) || isNaN(car.position.z);
-    if (hasNan) {
-      this.recoverCarToNearestCheckpoint(car);
-    } else {
-      const nearestInfo = this.trackHelper.getNearestTrackInfo(posCheckObj, car.id);
-      const roadHeight = nearestInfo ? nearestInfo.nearestPoint.y : 0;
-      const relativeY = car.position.y - roadHeight;
-      if (relativeY > 5.0 || relativeY < -2.0) {
-        this.recoverCarToNearestCheckpoint(car);
-      }
     }
 
     // Failsafe mechanism for stalled/stuck cars (speed stays 0 for 3 seconds under throttle)
@@ -441,12 +488,11 @@ export class GamePhysicsService {
     const checkTrackInfo = this.trackHelper.getNearestTrackInfo(posCheckVal, car.id);
     const currentRoadWidth = checkTrackInfo.width;
 
-    const shoulderStart = currentRoadWidth / 2 - 1.8;
     const absoluteLimit = currentRoadWidth / 2 - 0.45;
     const sideSign = Math.sign(checkTrackInfo.sideOffset);
 
-    if (Math.abs(checkTrackInfo.sideOffset) > shoulderStart) {
-      const offRoadFactor = Math.min(1.0, (Math.abs(checkTrackInfo.sideOffset) - shoulderStart) / 1.35);
+    const offRoadFactor = terrainManager.getOffRoadFactor(posCheckVal);
+    if (offRoadFactor > 0.0) {
       
       car.speed *= (1.0 - 0.08 * offRoadFactor * dt * 60); 
       activeGrip *= (1.0 - offRoadFactor * 0.35); 
@@ -511,45 +557,35 @@ export class GamePhysicsService {
     const pos3 = GamePhysicsService._vecA.set(car.position.x, car.position.y, car.position.z);
     const trackInfo = this.trackHelper.getNearestTrackInfo(pos3, car.id);
     
-    const bvhRoadY = (trackInfo.distanceToTrack < trackInfo.width / 2 + 3.0)
-      ? terrainManager.queryRoadHeight(pos3)
-      : null;
-    const terrainY = terrainManager.getHeight(car.position.x, car.position.z);
-    
-    let roadY = trackInfo.nearestPoint.y;
-    if (bvhRoadY !== null && Math.abs(bvhRoadY - trackInfo.nearestPoint.y) < 4.5) {
-      roadY = bvhRoadY;
-    } else {
-      if (trackInfo.distanceToTrack < trackInfo.width / 2 + 3.0) {
-        roadY = trackInfo.nearestPoint.y;
-      } else {
-        roadY = terrainY;
-      }
+    // TerrainManager is the ONLY owner of road height
+    const targetRoadY = terrainManager.getRoadHeight(pos3, car.lastValidY);
+    if (Number.isFinite(targetRoadY)) {
+      car.lastValidY = targetRoadY;
     }
-    
-    const minHeight = Math.max(roadY, terrainY);
-    const airborneDist = car.position.y - minHeight;
-    if (airborneDist > 0.3) {
-      car.position.y = minHeight;
-      car.velocity.y = 0;
-    }
+
+    // Use smooth interpolation to avoid sudden Y jumps or teleportation,
+    // and keep wheels firmly attached and glued to the road
+    const smoothLerpYFactor = car.isAI ? 35.0 : 25.0;
+    car.position.y = THREE.MathUtils.lerp(car.position.y, targetRoadY, smoothLerpYFactor * dt);
 
     const downforceY = -0.022 * car.speed * car.speed;
 
-    if (car.position.y <= minHeight + 0.15) {
+    if (car.position.y <= targetRoadY + 0.15) {
       const springK = 250.0;
       const dampC = 20.0;
-      const accelY = (minHeight - car.position.y) * springK - dampC * car.velocity.y + downforceY;
+      const accelY = (targetRoadY - car.position.y) * springK - dampC * car.velocity.y + downforceY;
       car.velocity.y += accelY * dt;
     } else {
       const gravity = 28.0;
       car.velocity.y += (-gravity + downforceY * 0.5) * dt;
     }
 
+    // Clamp vertical velocity to prevent insane launching, floating or hovering
+    car.velocity.y = THREE.MathUtils.clamp(car.velocity.y, -25.0, 25.0);
     car.position.y += car.velocity.y * dt;
 
-    if (car.position.y < minHeight) {
-      car.position.y = minHeight;
+    if (car.position.y < targetRoadY) {
+      car.position.y = targetRoadY;
       car.velocity.y = Math.max(0, car.velocity.y);
     }
 

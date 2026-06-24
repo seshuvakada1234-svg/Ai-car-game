@@ -6,6 +6,7 @@
 import { RoomService } from './RoomService';
 import { RoomState, RoomPlayer as GenericRoomPlayer } from './RoomState';
 import { Unsubscribe } from 'firebase/firestore';
+import { auth } from '../lib/firebase';
 
 export type RoomStatus = 'waiting' | 'countdown' | 'racing' | 'finished';
 
@@ -222,7 +223,10 @@ export class RoomManager {
     return RoomManager.currentRoomCode;
   }
 
-  static getCurrentPlayerId(): string | null {
+  static getCurrentPlayerId(): string {
+    if (auth.currentUser) {
+      return auth.currentUser.uid;
+    }
     if (!RoomManager.currentPlayerId) {
       RoomManager.currentPlayerId = this.getOrCreatePlayerId();
     }
@@ -234,6 +238,9 @@ export class RoomManager {
   }
 
   public static getOrCreatePlayerId(): string {
+    if (auth.currentUser) {
+      return auth.currentUser.uid;
+    }
     let id = sessionStorage.getItem('racePlayerId');
     if (!id) {
       id = `player_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;

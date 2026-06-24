@@ -58,6 +58,9 @@ export interface CarState {
   aiAggression: number;
   stuckTimer: number;
   lastRecoveryTime?: number;
+  recoveryCount?: number;
+  floatTimer?: number;
+  lastValidY?: number;
 
   // Control & Pipeline State
   throttle?: number;

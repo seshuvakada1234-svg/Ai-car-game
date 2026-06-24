@@ -8,6 +8,7 @@ import { CarState, ControlsState } from '../types';
 import { TrackGeometryHelper } from '../utils/track';
 import { MemoryPool } from '../utils/memoryPool';
 import { GamePhysicsService } from '../physics/GamePhysics';
+import { terrainManager } from '../world/TerrainManager';
 
 export class TrafficAIService {
   private trackHelper: TrackGeometryHelper;
@@ -60,9 +61,8 @@ export class TrafficAIService {
       const angle = Math.atan2(tangent.x, tangent.z);
 
       const trafficPos3 = new THREE.Vector3(spawnPos.x, 0, spawnPos.z);
-      const trackInfo = this.trackHelper.getNearestTrackInfo(trafficPos3);
-      const roadHeight = trackInfo ? trackInfo.nearestPoint.y : 0;
-      const spawnY = roadHeight + 0.05;
+      const roadHeight = terrainManager.getRoadHeight(trafficPos3);
+      const spawnY = roadHeight + 0.38;
 
       const speedRatio = 0.22 + (t % 3) * 0.06;
 
@@ -320,7 +320,7 @@ export class TrafficAIService {
           car.speed = 15;
           car.angle = Math.atan2(trackInfo.tangent.x, trackInfo.tangent.z);
           car.position.x = trackInfo.nearestPoint.x;
-          car.position.y = trackInfo.nearestPoint.y;
+          car.position.y = terrainManager.getRoadHeight(car.position, car.lastValidY);
           car.position.z = trackInfo.nearestPoint.z;
           car.velocity.x = trackInfo.tangent.x * 5;
           car.velocity.z = trackInfo.tangent.z * 5;

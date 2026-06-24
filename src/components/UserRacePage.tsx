@@ -97,8 +97,8 @@ export const UserRacePage: React.FC = () => {
         const spawnPos = pt.clone().addScaledVector(normal, side * 2.5);
 
         // Standard terrain road alignment
-        const roadHeight = terrainManager.queryRoadHeight(spawnPos);
-        const spawnY = (roadHeight !== null ? roadHeight : pt.y) + wheelRadius;
+        const roadHeight = terrainManager.getRoadHeight(spawnPos);
+        const spawnY = roadHeight + wheelRadius;
         const startAngle = Math.atan2(tangent.x, tangent.z);
 
         const carId = isMe ? 'player' : `remote_${p.uid}`;

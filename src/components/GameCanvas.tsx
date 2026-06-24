@@ -442,56 +442,6 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
             }
           });
 
-          // Cleanly heal/recover any cars with NaN positions, out of bounds coordinates, or floating > 5m high
-          currentCars.forEach((c) => {
-            if (!c || !c.position || !c.velocity) return;
-
-            if (
-              isNaN(c.position.x) || isNaN(c.position.y) || isNaN(c.position.z) ||
-              isNaN(c.velocity.x) || isNaN(c.velocity.y) || isNaN(c.velocity.z) ||
-              isNaN(c.speed) || isNaN(c.angle) || isNaN(c.angularVelocity)
-            ) {
-              console.warn(`Healing vehicle ${c.id} due to NaN properties.`);
-              c.position.x = isNaN(c.position.x) ? 0 : c.position.x;
-              c.position.y = isNaN(c.position.y) ? 0 : c.position.y;
-              c.position.z = isNaN(c.position.z) ? 0 : c.position.z;
-              c.velocity.x = isNaN(c.velocity.x) ? 0 : c.velocity.x;
-              c.velocity.y = isNaN(c.velocity.y) ? 0 : c.velocity.y;
-              c.velocity.z = isNaN(c.velocity.z) ? 0 : c.velocity.z;
-              c.speed = isNaN(c.speed) ? 0 : c.speed;
-              c.angle = isNaN(c.angle) ? 0 : c.angle;
-              c.angularVelocity = isNaN(c.angularVelocity) ? 0 : c.angularVelocity;
-              physicsService.recoverCarToNearestCheckpoint(c);
-              return;
-            }
-
-            // Map Bounds Check
-            if (Math.abs(c.position.x) > 3000 || c.position.z < -3000 || c.position.z > 4500) {
-              console.warn(`Healing vehicle ${c.id} because it drifted outside map bounds.`);
-              physicsService.recoverCarToNearestCheckpoint(c);
-              return;
-            }
-
-            // Floating detection: check height relative to ground/road
-            if (c.isAI) {
-              const roadHeight = RoadHeightSampler.getRoadHeightAt(c.position, trackHelper);
-              if (c.position.y > roadHeight + 5.0) {
-                console.warn(`Healing vehicle ${c.id} because it floated > 5.0m. Snapping to road height and recovering.`);
-                c.position.y = roadHeight;
-                c.velocity.y = 0;
-                physicsService.recoverCarToNearestCheckpoint(c);
-              }
-            } else {
-              const roadY = terrainManager.queryRoadHeight(c.position);
-              const terrainY = terrainManager.getHeight(c.position.x, c.position.z);
-              const groundY = roadY !== null ? roadY : terrainY;
-              if (c.position.y > groundY + 5.0) {
-                console.warn(`Healing vehicle ${c.id} because it floated > 5.0m in the air.`);
-                physicsService.recoverCarToNearestCheckpoint(c);
-              }
-            }
-          });
-
           physicsService.evaluatePositionsRanks(currentCars);
           particleSystemWrapper.update(physicsService, fixedDt);
           accumulatedTime -= fixedDt;

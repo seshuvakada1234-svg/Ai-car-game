@@ -218,6 +218,97 @@ export class TerrainManager {
     return null;
   }
 
+  /**
+   * Safe wrapper that guarantees a valid, non-NaN, non-Infinity road height.
+   * If road height query returns null/invalid, it falls back to lastValidY,
+   * then to the nearest track spline point, then to terrain, then to bedrock.
+   */
+  public getRoadHeight(pos: any, lastValidY?: number): number {
+    if (!pos || typeof pos.x !== 'number' || typeof pos.z !== 'number' || isNaN(pos.x) || isNaN(pos.z)) {
+      if (lastValidY !== undefined && Number.isFinite(lastValidY) && !isNaN(lastValidY)) {
+        return lastValidY;
+      }
+      return 0.0;
+    }
+
+    const queried = this.queryRoadHeight(pos);
+    if (queried !== null && Number.isFinite(queried) && !isNaN(queried)) {
+      return queried;
+    }
+
+    // Fallback 1: Spline-based nearest track point height
+    if (this.trackHelper && typeof this.trackHelper.getNearestTrackInfo === 'function') {
+      try {
+        const queryPos = MemoryPool.getVector().set(pos.x, pos.y || 0, pos.z);
+        const nearestInfo = this.trackHelper.getNearestTrackInfo(queryPos);
+        if (nearestInfo && nearestInfo.nearestPoint && Number.isFinite(nearestInfo.nearestPoint.y) && !isNaN(nearestInfo.nearestPoint.y)) {
+          return nearestInfo.nearestPoint.y;
+        }
+      } catch (e) {
+      }
+    }
+
+    // Fallback 2: Terrain height
+    const tHeight = this.getHeight(pos.x, pos.z);
+    if (Number.isFinite(tHeight) && !isNaN(tHeight)) {
+      return tHeight;
+    }
+
+    // Fallback 3: lastValidY
+    if (lastValidY !== undefined && Number.isFinite(lastValidY) && !isNaN(lastValidY)) {
+      return lastValidY;
+    }
+
+    // Ultimate fallback
+    return 0.0;
+  }
+
+  /**
+   * Gets the surface normal at the road. Falls back to track helper spline normals.
+   */
+  public getRoadNormal(pos: any, outNormal?: THREE.Vector3): THREE.Vector3 {
+    const normal = outNormal || new THREE.Vector3(0, 1, 0);
+    if (!pos) return normal;
+    
+    const tempNormal = new THREE.Vector3();
+    this.queryRoadHeight(pos, tempNormal);
+    if (tempNormal.lengthSq() > 0.1) {
+      normal.copy(tempNormal);
+    } else if (this.trackHelper) {
+      try {
+        const queryPos = MemoryPool.getVector().set(pos.x, pos.y || 0, pos.z);
+        const nearestInfo = this.trackHelper.getNearestTrackInfo(queryPos);
+        if (nearestInfo && nearestInfo.normal) {
+          normal.copy(nearestInfo.normal);
+        }
+      } catch (e) {}
+    }
+    return normal;
+  }
+
+  /**
+   * Evaluates how far off-road a position is (0.0 means on-road, 1.0 means fully off-road).
+   */
+  public getOffRoadFactor(pos: any): number {
+    if (!pos || !this.trackHelper) return 0.0;
+    try {
+      const queryPos = MemoryPool.getVector().set(pos.x, pos.y || 0, pos.z);
+      const nearestInfo = this.trackHelper.getNearestTrackInfo(queryPos);
+      const shoulderStart = nearestInfo.width / 2 - 1.8;
+      if (Math.abs(nearestInfo.sideOffset) > shoulderStart) {
+        return Math.min(1.0, (Math.abs(nearestInfo.sideOffset) - shoulderStart) / 1.35);
+      }
+    } catch (e) {}
+    return 0.0;
+  }
+
+  /**
+   * Checks if a position is considered off-road.
+   */
+  public isOffRoad(pos: any): boolean {
+    return this.getOffRoadFactor(pos) > 0.0;
+  }
+
   public clear(): void {
     TerrainManager.initialized = false;
     if (this.roadBVHMesh) {

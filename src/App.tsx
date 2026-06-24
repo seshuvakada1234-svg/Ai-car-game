@@ -556,8 +556,8 @@ function AppBody() {
       const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
       const spawnPos = pt.clone().addScaledVector(normal, side * 2.5);
 
-      const roadHeightTest = terrainManager.queryRoadHeight(spawnPos);
-      const spawnY = (roadHeightTest !== null ? roadHeightTest : pt.y) + wheelRadius;
+      const roadHeightTest = terrainManager.getRoadHeight(spawnPos);
+      const spawnY = roadHeightTest + wheelRadius;
       const startAngle = Math.atan2(tangent.x, tangent.z);
 
       const carId = isMe ? 'player' : (isAI ? p.id : `remote_${p.id}`);
