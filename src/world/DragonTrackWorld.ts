@@ -57,8 +57,8 @@ export class DragonTrackWorld {
     const rockBaseGeo = createProceduralRockGeo();
     const rockMatShared = new THREE.MeshStandardMaterial({ color: '#4a4d53', roughness: 0.95, flatShading: true });
     const rockInst = new THREE.InstancedMesh(rockBaseGeo, rockMatShared, trackHelper.rocks.length);
-    rockInst.castShadow = true;
-    rockInst.receiveShadow = true;
+    rockInst.castShadow = false;
+    rockInst.receiveShadow = false;
 
     const dummyObj = new THREE.Object3D();
     trackHelper.rocks.forEach((rk, index) => {
@@ -294,7 +294,7 @@ export class DragonTrackWorld {
     const postMat = new THREE.MeshStandardMaterial({ color: '#888888', metalness: 0.85, roughness: 0.15 });
     const post = new THREE.Mesh(postGeo, postMat);
     post.position.y = 1.25;
-    post.castShadow = true;
+    post.castShadow = false;
     signGroup.add(post);
 
     // 2. Sign face plate
@@ -317,7 +317,7 @@ export class DragonTrackWorld {
 
     const plate = new THREE.Mesh(boardGeo, boardMat);
     plate.position.set(0, 2.1, 0.02);
-    plate.castShadow = true;
+    plate.castShadow = false;
     signGroup.add(plate);
 
     return signGroup;
@@ -335,12 +335,12 @@ export class DragonTrackWorld {
     // Left and Right support legs on the shoulders
     const legL = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.22, 7.5, 8), metalMat);
     legL.position.set(width / 2 + 1.5, 3.75, 0);
-    legL.castShadow = true;
+    legL.castShadow = false;
     legL.receiveShadow = true;
 
     const legR = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.22, 7.5, 8), metalMat);
     legR.position.set(-(width / 2 + 1.5), 3.75, 0);
-    legR.castShadow = true;
+    legR.castShadow = false;
     legR.receiveShadow = true;
 
     gantry.add(legL, legR);
@@ -348,7 +348,7 @@ export class DragonTrackWorld {
     // Cross beam spanning over the lanes
     const crossBeam = new THREE.Mesh(new THREE.BoxGeometry(width + 4.2, 0.4, 0.4), metalMat);
     crossBeam.position.set(0, 7.3, 0);
-    crossBeam.castShadow = true;
+    crossBeam.castShadow = false;
     gantry.add(crossBeam);
 
     // Overhead highway green information guide board
@@ -377,7 +377,7 @@ export class DragonTrackWorld {
     });
     const infoBoard = new THREE.Mesh(infoBoardGeo, infoBoardMat);
     infoBoard.position.set(0, 6.3, 0.15);
-    infoBoard.castShadow = true;
+    infoBoard.castShadow = false;
     gantry.add(infoBoard);
 
     // Rotate gantry to look down the track path
@@ -727,13 +727,13 @@ export class DragonTrackWorld {
         // Sleek curved metallic lamp pole
         const slPole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.13, 7.5, 6), poleMat);
         slPole.position.y = 3.75;
-        slPole.castShadow = true;
+        slPole.castShadow = false;
         streetLightGroup.add(slPole);
 
         const slArm = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 1.6, 5), poleMat);
         slArm.rotation.z = Math.PI / 2;
         slArm.position.set(sideSym * -0.7, 7.4, 0);
-        slArm.castShadow = true;
+        slArm.castShadow = false;
         streetLightGroup.add(slArm);
 
         // Hanging sodium bulb
@@ -804,8 +804,8 @@ export class DragonTrackWorld {
 
     if (concreteMatrices.length > 0) {
       const bConcreteInst = new THREE.InstancedMesh(bConcreteGeo, bConcreteMat, concreteMatrices.length);
-      bConcreteInst.castShadow = true;
-      bConcreteInst.receiveShadow = true;
+      bConcreteInst.castShadow = false;
+      bConcreteInst.receiveShadow = false;
       concreteMatrices.forEach((mat, idx) => bConcreteInst.setMatrixAt(idx, mat));
       bConcreteInst.instanceMatrix.needsUpdate = true;
       scene.add(bConcreteInst);
@@ -822,7 +822,8 @@ export class DragonTrackWorld {
 
     if (railMatrices.length > 0) {
       const bRailInst = new THREE.InstancedMesh(bRailGeo, bRailMat, railMatrices.length);
-      bRailInst.castShadow = true;
+      bRailInst.castShadow = false;
+      bRailInst.receiveShadow = false;
       railMatrices.forEach((mat, idx) => bRailInst.setMatrixAt(idx, mat));
       bRailInst.instanceMatrix.needsUpdate = true;
       scene.add(bRailInst);

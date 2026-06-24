@@ -35,8 +35,8 @@ export class LODManager {
     centerY: number,
     centerZ: number,
     group: THREE.Object3D,
-    nearDistance = 250,
-    farDistance = 480
+    nearDistance = 50,
+    farDistance = 250
   ): void {
     if (this.sectors.some(s => s.name === name || s.group === group)) {
       return;
@@ -56,13 +56,14 @@ export class LODManager {
       }
     });
 
-    const finalFarDistance = Math.min(farDistance, 500);
+    const finalFarDistance = 250; // Universal 250m cull boundary
+    const finalNearDistance = 50; // Universal 50m detail boundary (LOD0: 0-50m)
 
     this.sectors.push({
       name,
       center: new THREE.Vector3(centerX, centerY, centerZ),
       group,
-      nearDistance,
+      nearDistance: finalNearDistance,
       farDistance: finalFarDistance,
       detailMeshes
     });
@@ -70,7 +71,11 @@ export class LODManager {
   }
 
   /**
-   * Evaluates player distance and updates visibility recursively
+   * Evaluates player distance and updates visibility recursively based on:
+   * LOD0: 0-50m (full details)
+   * LOD1: 50-120m (sector visible, details hidden)
+   * LOD2: 120-250m (sector visible, details hidden)
+   * Beyond 250m: hide objects completely
    */
   public update(playerPos: THREE.Vector3): void {
     if (!playerPos || typeof playerPos.distanceTo !== 'function') return;
@@ -81,8 +86,8 @@ export class LODManager {
 
       const dist = playerPos.distanceTo(sector.center);
 
-      if (dist > sector.farDistance) {
-        // Unload entirely from view
+      if (dist > 250) {
+        // Beyond 250m: hide objects completely
         if (sector.group.visible) {
           sector.group.visible = false;
         }
@@ -93,7 +98,9 @@ export class LODManager {
         }
 
         // Apply progressive detail scaling (Level of Detail)
-        const showDetails = dist <= sector.nearDistance;
+        // LOD0: 0-50m, LOD1: 50-120m, LOD2: 120-250m
+        // Show detailed segments only in LOD0 (0-50m)
+        const showDetails = dist <= 50;
         const details = sector.detailMeshes;
         const len = details.length;
         for (let idx = 0; idx < len; idx++) {

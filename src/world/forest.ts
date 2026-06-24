@@ -157,7 +157,7 @@ export class ForestSystem {
           const localNoise = SimpleNoise.noise(pt.x / 140.0, pt.z / 140.0);
 
           // --- BAND 1: Sparse Corridor (15m to 60m from road edge) ---
-          if (Math.random() < 0.04 * (localNoise * 0.8 + 0.2)) {
+          if (Math.random() < 0.015 * (localNoise * 0.8 + 0.2)) {
             const minCorrd = roadWidth / 2 + 15.0;
             const maxCorrd = roadWidth / 2 + 60.0;
             const perpOffset = minCorrd + Math.random() * (maxCorrd - minCorrd);
@@ -187,50 +187,15 @@ export class ForestSystem {
             }
           }
 
-          // --- BAND 2: Medium Corridor (60m to 200m from road edge) ---
+          // --- BAND 2: Medium Corridor (60m to 150m from road edge) ---
           const medNoise = SimpleNoise.noise(pt.x / 90.0, pt.z / 90.0);
-          if (Math.random() < 0.10 * medNoise) {
+          if (Math.random() < 0.035 * medNoise) {
             const minCorrd = roadWidth / 2 + 60.0;
-            const maxCorrd = roadWidth / 2 + 200.0;
+            const maxCorrd = roadWidth / 2 + 150.0;
             const attempts = 1;
             for (let att = 0; att < attempts; att++) {
               const perpOffset = minCorrd + Math.random() * (maxCorrd - minCorrd);
               const tangentJitter = (Math.random() * 2.0 - 1.0) * 12.0;
-
-              const pos = new THREE.Vector3()
-                .copy(pt)
-                .addScaledVector(normal, side * perpOffset)
-                .addScaledVector(tangent, tangentJitter);
-
-              pos.y = terrainManager.getHeight(pos.x, pos.z);
-
-              if (this.isValidTreeLocation(pos, u, trackHelper)) {
-                const mappedType = treeIdCounter % 4;
-                const tScale = 0.8 + Math.random() * 0.7;
-                const tRotY = Math.random() * Math.PI * 2;
-
-                const newTree: ForestTree = {
-                  id: treeIdCounter++,
-                  position: pos,
-                  scale: tScale,
-                  rotationY: tRotY,
-                  type: mappedType
-                };
-                this.trees.push(newTree);
-                this.treesByType[mappedType].push(newTree);
-              }
-            }
-          }
-
-          // --- BAND 3: Dense Corridor (200m to 500m max from road edge instead of 800m) ---
-          const wideNoise = SimpleNoise.noise(pt.x / 180.0, pt.z / 180.0);
-          if (Math.random() < 0.12 * wideNoise) {
-            const minCorrd = roadWidth / 2 + 200.0;
-            const maxCorrd = roadWidth / 2 + 500.0;
-            const attempts = 1;
-            for (let att = 0; att < attempts; att++) {
-              const perpOffset = minCorrd + Math.random() * (maxCorrd - minCorrd);
-              const tangentJitter = (Math.random() * 2.0 - 1.0) * 35.0;
 
               const pos = new THREE.Vector3()
                 .copy(pt)
@@ -406,13 +371,13 @@ export class ForestSystem {
     this.lastCameraPos.copy(playerPos);
 
     // Dynamic Level of Detail squared range parameters:
-    // 0 - 500 (22m): Near trees
-    // 500 - 2000 (45m): Medium
-    // 2000 - 5000 (70m): Far billboards
-    // Beyond 5000: Unload (Scale to 0)
-    const highDistSq = 500;
-    const medDistSq = 2000;
-    const lowDistSq = 5000;
+    // LOD0: 0-50m (high-fidelity trees near camera)
+    // LOD1: 50-120m (medium-fidelity performance models)
+    // LOD2: 120-150m (low-fidelity crossing quads)
+    // Beyond 150m: Hide vegetation completely to sustain 60+ FPS
+    const highDistSq = 2500;
+    const medDistSq = 14400;
+    const lowDistSq = 22500;
 
     // 1. UPDATE CHOSEN LOD FOR FOREST TREES
     for (let type = 0; type < 4; type++) {
@@ -540,8 +505,8 @@ export class ForestSystem {
       }
     }
 
-    // 2. UPDATE ROADSIDE VEGETATION (Draw only within 120m for seamless graphics and FPS)
-    const roadsideRangeSq = 120 * 120;
+    // 2. UPDATE ROADSIDE VEGETATION (Draw only within 150m for seamless graphics and FPS)
+    const roadsideRangeSq = 150 * 150;
     for (let cat = 0; cat < 5; cat++) {
       const count = this.roadsideCoords[cat].length;
       if (count === 0) continue;
@@ -779,8 +744,8 @@ export class ForestSystem {
       if (count === 0) continue;
 
       const inst = new THREE.InstancedMesh(geometries[cat], materials[cat], count);
-      inst.castShadow = (cat >= 2);
-      inst.receiveShadow = true;
+      inst.castShadow = false;
+      inst.receiveShadow = false;
 
       for (let i = 0; i < count; i++) {
         inst.setMatrixAt(i, this.zeroMatrix);
@@ -927,8 +892,8 @@ export class ForestSystem {
       // Instantiate loaded submeshes
       const newInsts = submeshes.map((m) => {
         const inst = new THREE.InstancedMesh(m.geometry, m.material, count);
-        inst.castShadow = (cat >= 2);
-        inst.receiveShadow = true;
+        inst.castShadow = false;
+        inst.receiveShadow = false;
         scene.add(inst);
         return inst;
       });

@@ -616,22 +616,13 @@ export const preloadGLTFAssets = async (): Promise<void> => {
     };
 
     gltfModelCache.treeModel = await tryLoadPath([
-      '/nature/trees/tree.glb',
-      '/nature/trees/pine.glb'
+      'https://pub-a248afed72844944a7565dc9cbaacbb0.r2.dev/Trees/pine_tree_-_ps1_low_poly.glb',
+      'https://pub-a248afed72844944a7565dc9cbaacbb0.r2.dev/Trees/old_tree.glb'
     ]);
 
-    gltfModelCache.rockModel = await tryLoadPath([
-      '/nature/rocks/rock.glb',
-      '/nature/rocks/stone.glb'
-    ]);
-
-    gltfModelCache.mountainModel = await tryLoadPath([
-      '/environment/mountain.glb'
-    ]);
-
-    gltfModelCache.pagodaModel = await tryLoadPath([
-      '/environment/pagoda.glb'
-    ]);
+    gltfModelCache.rockModel = null;
+    gltfModelCache.mountainModel = null;
+    gltfModelCache.pagodaModel = null;
 
     gltfModelCache.isLoaded = true;
     console.log('Hypercar models loaded successfully.');

@@ -21,7 +21,7 @@ export function buildHighway(scene: THREE.Scene, trackHelper: TrackGeometryHelpe
     );
     // Let the pole sink 2m into bedrock to guarantee complete grounding
     pole.position.y = poleHeight / 2 - 2.0;
-    pole.castShadow = true;
+    pole.castShadow = false;
     bSet.add(pole);
 
     // Create a high visual quality billboard canvas texture with realistic European branding
@@ -70,7 +70,7 @@ export function buildHighway(scene: THREE.Scene, trackHelper: TrackGeometryHelpe
     );
     // Position billboard crowning the pole high above the tarmac
     board.position.y = poleHeight - 5.0;
-    board.castShadow = true;
+    board.castShadow = false;
     bSet.add(board);
 
     billboardGroup.add(bSet);

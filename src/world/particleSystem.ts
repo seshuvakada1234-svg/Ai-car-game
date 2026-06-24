@@ -16,7 +16,7 @@ export class ParticleSystem {
   private static instance: ParticleSystem | null = null;
   private particles: Particle[] = [];
   private poolIndex = 0;
-  private maxParticles = 800; // Increased to 800 to handle multiple cars
+  private maxParticles = 200; // Limited to 200 max to optimize performance on mobile/low-end GPUs
   
   private instancedMesh: THREE.InstancedMesh | null = null;
   private dummy = new THREE.Object3D();

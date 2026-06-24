@@ -55,8 +55,8 @@ export class CoastalSunsetTrackWorld {
    * Inject high-fidelity sunset lighting and disable real-time shadow computation to hit 60 FPS target
    */
   private setupSunsetAtmosphere(scene: THREE.Scene) {
-    // Soft twilight indigo ambient fill
-    const ambientLight = new THREE.AmbientLight('#2a1240', 1.8);
+    // Soft twilight indigo/orange ambient hemisphere fill
+    const ambientLight = new THREE.HemisphereLight('#2a1240', '#4a2220', 1.8);
     scene.add(ambientLight);
 
     // Low-angle strong orange sunset sun
@@ -64,11 +64,6 @@ export class CoastalSunsetTrackWorld {
     sunLight.position.set(400, 48, -120);
     sunLight.castShadow = false; // STRIKT RULE: Disable real-time shadow maps
     scene.add(sunLight);
-
-    // Soft peach secondary light
-    const peachLight = new THREE.DirectionalLight('#ffe17d', 1.2);
-    peachLight.position.set(-200, 15, 300);
-    scene.add(peachLight);
   }
 
   /**

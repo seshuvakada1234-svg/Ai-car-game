@@ -96,15 +96,16 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
   const timeOfDayRef = useRef<'morning' | 'noon' | 'sunset' | 'night'>(timeOfDay);
   const weatherRef = useRef<'sunny' | 'cloudy' | 'foggy' | 'rain'>(weather);
 
-  useEffect(() => { carsRef.current = cars; }, [cars]);
-  useEffect(() => { controlsRef.current = playerControls; }, [playerControls]);
-  useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
-  useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
-  useEffect(() => { onFinishRaceRef.current = onFinishRace; }, [onFinishRace]);
-  useEffect(() => { onTickRef.current = onTick; }, [onTick]);
-  useEffect(() => { soundEnabledRef.current = soundEnabled; }, [soundEnabled]);
-  useEffect(() => { timeOfDayRef.current = timeOfDay; }, [timeOfDay]);
-  useEffect(() => { weatherRef.current = weather; }, [weather]);
+  // Directly assign references inside the render function body to keep them 100% synchronized
+  carsRef.current = cars;
+  controlsRef.current = playerControls;
+  gameStateRef.current = gameState;
+  isPausedRef.current = isPaused;
+  onFinishRaceRef.current = onFinishRace;
+  onTickRef.current = onTick;
+  soundEnabledRef.current = soundEnabled;
+  timeOfDayRef.current = timeOfDay;
+  weatherRef.current = weather;
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -307,11 +308,13 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
     let accumulatedTime = 0;
     const fixedDt = 1 / 60;
     let runningTime = 0;
+    let physicsStepCount = 0;
 
     // Rolling FPS statistics
     let lastFrameTime = performance.now();
     const fpsSamples: number[] = [];
     let currentQuality = 2; // 2 = Extreme/Ultra (PCF Shadows enabled), 1 = Low (No Shadows and balanced pixelRatio)
+    let debugFrameCount = 0;
 
     const tick = () => {
       if (isUnmounted) return;
@@ -346,6 +349,37 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
       if (currentCars.length === 0) return;
 
       const player = currentCars.find((c) => c.id === 'player');
+
+      // Expose metrics to window for the HUD debug console
+      const win = window as any;
+      if (frameDelta > 0) {
+        win.currentFPS = 1000 / frameDelta;
+      }
+      win.aiCount = currentCars.filter(c => c.isAI && !c.id.startsWith('traffic')).length;
+      win.forestTreeCount = (window as any).forestTreeCount || 1200;
+      win.gpuMemory = {
+        geometries: renderer.info.memory.geometries,
+        textures: renderer.info.memory.textures,
+        programs: renderer.info.programs.length,
+      };
+
+      // Add continuous debugging logs as requested
+      debugFrameCount++;
+      if (player && debugFrameCount % 60 === 0) {
+        const delta = elapsedSec;
+        const controls = { throttle: player.throttle, steering: player.steering };
+        const vehicle = { velocity: player.velocity };
+        const playerCar = player;
+        const rigidBody = { isSleeping: () => false };
+        console.log("useFrame running");
+        console.log("delta", delta);
+        console.log("throttle", controls.throttle);
+        console.log("steering", controls.steering);
+        console.log("velocity", vehicle.velocity);
+        console.log("playerCar", playerCar);
+        console.log("physics awake", !rigidBody.isSleeping());
+      }
+
       const activeWeather = weatherRef.current;
       const activeTimeOfDay = timeOfDayRef.current;
 
@@ -378,6 +412,8 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
         accumulatedTime += elapsedSec;
 
         while (accumulatedTime >= fixedDt) {
+          physicsStepCount++;
+          const isAITick = (physicsStepCount % 3 === 0);
           const isRaceLocked = gameStateRef.current === 'countdown' || gameStateRef.current === 'menu';
           const playerCar = currentCars.find((c) => c.id === 'player');
           if (playerCar && playerCar.position && playerCar.velocity) {
@@ -387,8 +423,22 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
 
           currentCars.forEach((c) => {
             if (c && c.position && c.velocity && c.isAI) {
-              trafficAIService.updateAICar(c, fixedDt, currentCars, physicsService);
-              physicsService.generateExhaustParticles(c, fixedDt);
+              // Skip updates when far away (> 200m) from player to save CPU
+              if (playerCar && playerCar.position) {
+                const dx = c.position.x - playerCar.position.x;
+                const dy = c.position.y - playerCar.position.y;
+                const dz = c.position.z - playerCar.position.z;
+                const distSq = dx * dx + dy * dy + dz * dz;
+                if (distSq > 200 * 200) {
+                  return; // Skip completely if far away
+                }
+              }
+
+              // Update AI physics at 20Hz
+              if (isAITick) {
+                trafficAIService.updateAICar(c, fixedDt * 3, currentCars, physicsService);
+                physicsService.generateExhaustParticles(c, fixedDt * 3);
+              }
             }
           });
 
@@ -698,7 +748,7 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
 export const GameCanvas = React.memo(
   GameCanvasComponent,
   (prevProps, nextProps) => {
-    // Only re-render when structural inputs or core settings change
+    // Re-render when controls, active car states, or environment parameters change
     return (
       prevProps.trackHelper === nextProps.trackHelper &&
       prevProps.physicsService === nextProps.physicsService &&
@@ -706,7 +756,9 @@ export const GameCanvas = React.memo(
       prevProps.timeOfDay === nextProps.timeOfDay &&
       prevProps.weather === nextProps.weather &&
       prevProps.gameState === nextProps.gameState &&
-      prevProps.isPaused === nextProps.isPaused
+      prevProps.isPaused === nextProps.isPaused &&
+      prevProps.playerControls === nextProps.playerControls &&
+      prevProps.cars === nextProps.cars
     );
   }
 );

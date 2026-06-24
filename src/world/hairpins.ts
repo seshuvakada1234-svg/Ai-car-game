@@ -22,8 +22,8 @@ export function buildHairpins(scene: THREE.Scene, trackHelper: TrackGeometryHelp
       wall.position.copy(pt).addScaledVector(normal, sideSign * (roadWidth / 2 + 13));
       wall.position.y += Math.random() * 4 - 2;
       wall.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, 0);
-      wall.castShadow = true;
-      wall.receiveShadow = true;
+      wall.castShadow = false;
+      wall.receiveShadow = false;
       cliffGroup.add(wall);
     }
   });

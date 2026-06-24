@@ -28,7 +28,7 @@ export function buildAnimals(scene: THREE.Scene, trackHelper: TrackGeometryHelpe
     const body = new THREE.Mesh(new THREE.IcosahedronGeometry(0.7, 1), sheepWoolMat);
     body.position.y = 0.65;
     body.scale.set(1.1, 1.0, 1.4);
-    body.castShadow = true;
+    body.castShadow = false;
     sheep.add(body);
 
     // Cute black head
@@ -52,7 +52,7 @@ export function buildAnimals(scene: THREE.Scene, trackHelper: TrackGeometryHelpe
     legPositions.forEach(pos => {
       const leg = new THREE.Mesh(legGeo, legWoodMat);
       leg.position.set(pos[0], pos[1], pos[2]);
-      leg.castShadow = true;
+      leg.castShadow = false;
       sheep.add(leg);
     });
 
@@ -96,8 +96,8 @@ export function buildAnimals(scene: THREE.Scene, trackHelper: TrackGeometryHelpe
     // Cow rectangular main torso
     const body = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.2, 2.2), cowWhiteMat);
     body.position.y = 1.1;
-    body.castShadow = true;
-    body.receiveShadow = true;
+    body.castShadow = false;
+    body.receiveShadow = false;
     cow.add(body);
 
     // Decorative black paint patches on dairy cow torso (using overlay meshes to look pristine!)
@@ -117,7 +117,7 @@ export function buildAnimals(scene: THREE.Scene, trackHelper: TrackGeometryHelpe
 
     const skull = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.55, 0.65), cowWhiteMat);
     skull.position.set(0, 0, 0.1);
-    skull.castShadow = true;
+    skull.castShadow = false;
     head.add(skull);
 
     // Pink muzzle snout block
@@ -148,7 +148,7 @@ export function buildAnimals(scene: THREE.Scene, trackHelper: TrackGeometryHelpe
     legPositions.forEach(pos => {
       const leg = new THREE.Mesh(legGeo, cowPatchMat);
       leg.position.set(pos[0], pos[1], pos[2]);
-      leg.castShadow = true;
+      leg.castShadow = false;
       cow.add(leg);
     });
 
