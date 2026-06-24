@@ -15,14 +15,14 @@ export class ShaderPreloader {
    * Pre-compiles complex car and scenery materials so there are no WebGL compilation stalls
    */
   public static async preloadShaders(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera): Promise<void> {
-    if (this.warmedRenderers.has(renderer)) {
-      console.log('ShaderPreloader: Already compiled once on this renderer, skipping redundant run.');
+    if (this.compiled || this.warmedRenderers.has(renderer)) {
+      console.log('ShaderPreloader: Already compiled once, skipping duplicate compilation.');
       return;
     }
+    this.compiled = true;
     this.warmedRenderers.add(renderer);
     ShaderPreloader.initialized = true;
     ShaderPreloader.hasCompiled = true;
-    ShaderPreloader.compiled = true;
     console.log('ShaderPreloader: Initiating pre-compilation on background WebGL context...');
     
     // Create dummy materials replicating full paint, brake light and PBR glass shaders during the countdown

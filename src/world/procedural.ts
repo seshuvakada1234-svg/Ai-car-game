@@ -250,13 +250,15 @@ export function createCarChassisGroup(c: CarState, reflectionTex: THREE.Texture,
   const spinners: THREE.Group[] = [];
   const tlMat = new THREE.MeshBasicMaterial({ color: '#770010' });
 
+  const isPlayer = (c.id === 'player');
+
   // Sleek, fully procedural aerodynamic vehicle shell using cylinder/torus/cone geometries only
   // Zero BoxGeometry or CapsuleGeometry placeholders are utilized, preserving the clean look.
   const bodyGeo = new THREE.CylinderGeometry(0.68, 1.05, 3.8, 10);
   bodyGeo.rotateX(Math.PI / 2);
   const bodyMesh = new THREE.Mesh(bodyGeo, paint);
   bodyMesh.position.set(0, 0.45, 0);
-  bodyMesh.castShadow = true;
+  bodyMesh.castShadow = isPlayer;
   bodyMesh.receiveShadow = true;
   bodyMesh.visible = true; // Enabled by default as fallback
   mainCarGroup.add(bodyMesh);
@@ -265,7 +267,7 @@ export function createCarChassisGroup(c: CarState, reflectionTex: THREE.Texture,
   noseGeo.rotateX(Math.PI / 2);
   const noseMesh = new THREE.Mesh(noseGeo, paint);
   noseMesh.position.set(0, 0.35, 1.7);
-  noseMesh.castShadow = true;
+  noseMesh.castShadow = isPlayer;
   noseMesh.visible = true; // Enabled by default as fallback
   mainCarGroup.add(noseMesh);
 
@@ -284,7 +286,7 @@ export function createCarChassisGroup(c: CarState, reflectionTex: THREE.Texture,
   const canopyMesh = new THREE.Mesh(canopyGeo, glassMat);
   canopyMesh.position.set(0, 0.68, -0.2);
   canopyMesh.scale.set(1.1, 0.62, 1.0);
-  canopyMesh.castShadow = true;
+  canopyMesh.castShadow = isPlayer;
   canopyMesh.visible = true; // Enabled by default as fallback
   mainCarGroup.add(canopyMesh);
 
@@ -302,7 +304,7 @@ export function createCarChassisGroup(c: CarState, reflectionTex: THREE.Texture,
     tireGeo.rotateZ(Math.PI / 2);
     const tireMat = new THREE.MeshStandardMaterial({ color: '#121213', roughness: 0.92, metalness: 0.02 });
     const tire = new THREE.Mesh(tireGeo, tireMat);
-    tire.castShadow = true;
+    tire.castShadow = isPlayer;
     tire.receiveShadow = true;
     spinner.add(tire);
 

@@ -72,10 +72,46 @@ export class AssetManager {
   }
 }
 
+// Dedicated Cache Manager for preventing duplicate GLTF downloads and mapping asset paths
+export class AssetCacheManager {
+  private static cache = new Map<string, Promise<any>>();
+
+  public static get(url: string): Promise<any> | undefined {
+    return this.cache.get(url);
+  }
+
+  public static set(url: string, promise: Promise<any>): void {
+    this.cache.set(url, promise);
+  }
+
+  public static has(url: string): boolean {
+    return this.cache.has(url);
+  }
+
+  public static remapUrl(url: string): string {
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      return url;
+    }
+    let p = url;
+    if (p.startsWith('/')) {
+      p = p.substring(1);
+    }
+    if (p.startsWith('nature/trees/')) {
+      return `https://pub-a248afed72844944a7565dc9cbaacbb0.r2.dev/Trees/${p.substring('nature/trees/'.length)}`;
+    }
+    if (p.startsWith('nature/rocks/')) {
+      return `https://pub-a248afed72844944a7565dc9cbaacbb0.r2.dev/Rocks/${p.substring('nature/rocks/'.length)}`;
+    }
+    if (p.startsWith('environment/')) {
+      return `https://pub-a248afed72844944a7565dc9cbaacbb0.r2.dev/Environment/${p.substring('environment/'.length)}`;
+    }
+    return `https://pub-a248afed72844944a7565dc9cbaacbb0.r2.dev/${p}`;
+  }
+}
+
 // 2. High-performance Three.js caching module to prevent duplicate browser downloads
 export class ThreeAssetLoader {
   private static instance: ThreeAssetLoader | null = null;
-  private gltfCache = new Map<string, Promise<any>>();
   private textureCache = new Map<string, THREE.Texture>();
   private materialCache = new Map<string, THREE.Material>();
   private audioCache = new Map<string, any>();
@@ -106,20 +142,46 @@ export class ThreeAssetLoader {
   }
 
   public async loadGLTF(url: string): Promise<any> {
-    if (this.gltfCache.has(url)) {
-      return this.gltfCache.get(url)!;
+    const finalUrl = AssetCacheManager.remapUrl(url);
+
+    if (AssetCacheManager.has(finalUrl)) {
+      return AssetCacheManager.get(finalUrl)!;
     }
 
-    const promise = new Promise<any>((resolve, reject) => {
-      this.gltfLoader.load(
-        url,
-        (gltf) => resolve(gltf),
-        undefined,
-        (err) => reject(err)
-      );
-    });
+    const promise = (async () => {
+      try {
+        console.log(`Preflight fetching GLTF asset: ${finalUrl}`);
+        const response = await fetch(finalUrl);
+        if (!response.ok) {
+          console.error(`Asset missing: ${finalUrl} failed with status ${response.status}`);
+          throw new Error('Asset missing');
+        }
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('text/html')) {
+          console.error(`Asset missing: ${finalUrl} returned HTML page instead of a binary GLTF file.`);
+          throw new Error('Asset missing');
+        }
 
-    this.gltfCache.set(url, promise);
+        return await new Promise<any>((resolve, reject) => {
+          this.gltfLoader.load(
+            finalUrl,
+            (gltf) => {
+              resolve(gltf);
+            },
+            undefined,
+            (err) => {
+              console.error(`GLTFLoader parsing error on ${finalUrl}:`, err);
+              reject(err);
+            }
+          );
+        });
+      } catch (err) {
+        console.error(`GLTF Preflight check failed for ${finalUrl}:`, err);
+        throw err;
+      }
+    })();
+
+    AssetCacheManager.set(finalUrl, promise);
     return promise;
   }
 

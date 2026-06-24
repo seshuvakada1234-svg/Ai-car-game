@@ -9,6 +9,7 @@ import { GamePhase, GameSettings, CarState, ControlsState } from './types';
 import { TrackGeometryHelper } from './utils/track';
 import { GamePhysicsService } from './physics/GamePhysics';
 import { GameCanvas } from './components/GameCanvas';
+import { DebugPanel } from './components/DebugPanel';
 import { HUD } from './components/HUD';
 import { Menu } from './components/Menu';
 import { GameOver } from './components/GameOver';
@@ -238,6 +239,11 @@ const RacingCanvasUnit: React.FC<RacingCanvasUnitProps> = ({
           playersCount={mp.room.players.length}
           isLiveMode={mp.room.isLiveMode}
         />
+      )}
+
+      {/* High-accuracy neon performance monitoring console */}
+      {(phase === 'racing' || phase === 'countdown') && (
+        <DebugPanel />
       )}
 
       {/* GameOver celebration statistics and leaderboards link */}

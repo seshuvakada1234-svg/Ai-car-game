@@ -56,15 +56,17 @@ export class LODManager {
       }
     });
 
+    const finalFarDistance = Math.min(farDistance, 500);
+
     this.sectors.push({
       name,
       center: new THREE.Vector3(centerX, centerY, centerZ),
       group,
       nearDistance,
-      farDistance,
+      farDistance: finalFarDistance,
       detailMeshes
     });
-    console.log(`Registered Scenery LOD Sector: ${name} (far: ${farDistance}m, detailed segments cached: ${detailMeshes.length})`);
+    console.log(`Registered Scenery LOD Sector: ${name} (far: ${finalFarDistance}m, detailed segments cached: ${detailMeshes.length})`);
   }
 
   /**

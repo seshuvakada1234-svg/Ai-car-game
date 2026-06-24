@@ -106,24 +106,18 @@ export class ForestSystem {
    * then launches background asynchronous preloading of the high-fidelity GLB models.
    */
   public init(scene: THREE.Scene, trackHelper: TrackGeometryHelper): void {
-    if (this.isInitialized || ForestSystem.initialized) {
-      console.log('ForestSystem already initialized, skipping duplicate init.');
-      return;
-    }
-    this.isInitialized = true;
-    ForestSystem.initialized = true;
+    // Note: Do not early skip if ForestSystem.initialized is set because we want to attach instanced meshes
+    // to the newly passed scene object, but we will reuse coordinates to avoid heavy regeneration.
+    const coordinatesCached = (this.trees && this.trees.length > 0);
 
     this.scene = scene;
     this.trackHelper = trackHelper;
-    this.trees = [];
-    this.treesByType = [[], [], [], []];
     this.highInsts = [[], [], [], []];
     this.medInsts = [[], [], [], []];
     this.lowInsts = [];
     this.gltfSubmeshes = [[], [], [], []];
     this.isLoaded = [false, false, false, false];
 
-    this.roadsideCoords = [[], [], [], [], []];
     this.roadsideInsts = [[], [], [], [], []];
     this.naturePackSubmeshes = [[], [], [], [], []];
     this.isNaturePackLoaded = false;
@@ -131,219 +125,226 @@ export class ForestSystem {
     this.lastCameraPos.set(Infinity, Infinity, Infinity);
     this.lastUpdateTime = 0;
 
-    console.log('Initializing AAA Forest System...');
+    console.log('Initializing AAA Forest System... Reuse Coordinates:', coordinatesCached);
 
-    // 1. Generate organic, highly realistic forest coordinates using Perlin-style noise probability maps
-    console.log('Generating organic forest trees around active loop corridors...');
-    
-    // Sample the spline curve to construct the natural gameplay corridors
-    const steps = 1200;
-    let treeIdCounter = 0;
+    if (!coordinatesCached) {
+      this.trees = [];
+      this.treesByType = [[], [], [], []];
+      this.roadsideCoords = [[], [], [], [], []];
 
-    for (let j = 0; j < steps; j++) {
-      const u = j / steps;
-      const pt = trackHelper.curve.getPointAt(u);
-      const tangent = trackHelper.curve.getTangentAt(u).normalize();
-      const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
-      const roadWidth = trackHelper.getRoadWidthAt(u);
-      const rType = trackHelper.getRoadTypeAt(u);
+      // 1. Generate organic, highly realistic forest coordinates using Perlin-style noise probability maps
+      console.log('Generating organic forest trees around active loop corridors...');
+      
+      // Sample the spline curve to construct the natural gameplay corridors
+      const steps = 1200;
+      let treeIdCounter = 0;
 
-      // Bridges have strictly NO trees
-      if (rType === 'bridge') {
-        continue;
+      for (let j = 0; j < steps; j++) {
+        const u = j / steps;
+        const pt = trackHelper.curve.getPointAt(u);
+        const tangent = trackHelper.curve.getTangentAt(u).normalize();
+        const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
+        const roadWidth = trackHelper.getRoadWidthAt(u);
+        const rType = trackHelper.getRoadTypeAt(u);
+
+        // Bridges have strictly NO trees
+        if (rType === 'bridge') {
+          continue;
+        }
+
+        for (let side of [-1, 1]) {
+          // Query local spatial noise value for organic clusters/glade designs
+          const localNoise = SimpleNoise.noise(pt.x / 140.0, pt.z / 140.0);
+
+          // --- BAND 1: Sparse Corridor (15m to 60m from road edge) ---
+          if (Math.random() < 0.04 * (localNoise * 0.8 + 0.2)) {
+            const minCorrd = roadWidth / 2 + 15.0;
+            const maxCorrd = roadWidth / 2 + 60.0;
+            const perpOffset = minCorrd + Math.random() * (maxCorrd - minCorrd);
+            const tangentJitter = (Math.random() * 2.0 - 1.0) * 4.0;
+
+            const pos = new THREE.Vector3()
+              .copy(pt)
+              .addScaledVector(normal, side * perpOffset)
+              .addScaledVector(tangent, tangentJitter);
+
+            pos.y = terrainManager.getHeight(pos.x, pos.z);
+
+            if (this.isValidTreeLocation(pos, u, trackHelper)) {
+              const mappedType = treeIdCounter % 4; // 0=Pine, 1=Old, 2=Sakura, 3=GN
+              const tScale = 0.8 + Math.random() * 0.7; // 0.8 to 1.5
+              const tRotY = Math.random() * Math.PI * 2; // 0 to 360 deg
+
+              const newTree: ForestTree = {
+                id: treeIdCounter++,
+                position: pos,
+                scale: tScale,
+                rotationY: tRotY,
+                type: mappedType
+              };
+              this.trees.push(newTree);
+              this.treesByType[mappedType].push(newTree);
+            }
+          }
+
+          // --- BAND 2: Medium Corridor (60m to 200m from road edge) ---
+          const medNoise = SimpleNoise.noise(pt.x / 90.0, pt.z / 90.0);
+          if (Math.random() < 0.10 * medNoise) {
+            const minCorrd = roadWidth / 2 + 60.0;
+            const maxCorrd = roadWidth / 2 + 200.0;
+            const attempts = 1;
+            for (let att = 0; att < attempts; att++) {
+              const perpOffset = minCorrd + Math.random() * (maxCorrd - minCorrd);
+              const tangentJitter = (Math.random() * 2.0 - 1.0) * 12.0;
+
+              const pos = new THREE.Vector3()
+                .copy(pt)
+                .addScaledVector(normal, side * perpOffset)
+                .addScaledVector(tangent, tangentJitter);
+
+              pos.y = terrainManager.getHeight(pos.x, pos.z);
+
+              if (this.isValidTreeLocation(pos, u, trackHelper)) {
+                const mappedType = treeIdCounter % 4;
+                const tScale = 0.8 + Math.random() * 0.7;
+                const tRotY = Math.random() * Math.PI * 2;
+
+                const newTree: ForestTree = {
+                  id: treeIdCounter++,
+                  position: pos,
+                  scale: tScale,
+                  rotationY: tRotY,
+                  type: mappedType
+                };
+                this.trees.push(newTree);
+                this.treesByType[mappedType].push(newTree);
+              }
+            }
+          }
+
+          // --- BAND 3: Dense Corridor (200m to 500m max from road edge instead of 800m) ---
+          const wideNoise = SimpleNoise.noise(pt.x / 180.0, pt.z / 180.0);
+          if (Math.random() < 0.12 * wideNoise) {
+            const minCorrd = roadWidth / 2 + 200.0;
+            const maxCorrd = roadWidth / 2 + 500.0;
+            const attempts = 1;
+            for (let att = 0; att < attempts; att++) {
+              const perpOffset = minCorrd + Math.random() * (maxCorrd - minCorrd);
+              const tangentJitter = (Math.random() * 2.0 - 1.0) * 35.0;
+
+              const pos = new THREE.Vector3()
+                .copy(pt)
+                .addScaledVector(normal, side * perpOffset)
+                .addScaledVector(tangent, tangentJitter);
+
+              pos.y = terrainManager.getHeight(pos.x, pos.z);
+
+              if (this.isValidTreeLocation(pos, u, trackHelper)) {
+                const mappedType = treeIdCounter % 4;
+                const tScale = 0.8 + Math.random() * 0.7;
+                const tRotY = Math.random() * Math.PI * 2;
+
+                const newTree: ForestTree = {
+                  id: treeIdCounter++,
+                  position: pos,
+                  scale: tScale,
+                  rotationY: tRotY,
+                  type: mappedType
+                };
+                this.trees.push(newTree);
+                this.treesByType[mappedType].push(newTree);
+              }
+            }
+          }
+        }
       }
 
-      for (let side of [-1, 1]) {
-        // Query local spatial noise value for organic clusters/glade designs
-        const localNoise = SimpleNoise.noise(pt.x / 140.0, pt.z / 140.0);
+      console.log(`Forest populated organic: Total of ${this.trees.length} valid trees arranged into organic clusters!`);
 
-        // --- BAND 1: Sparse Corridor (15m to 60m from road edge) ---
-        if (Math.random() < 0.12 * (localNoise * 0.8 + 0.2)) {
-          const minCorrd = roadWidth / 2 + 15.0;
-          const maxCorrd = roadWidth / 2 + 60.0;
-          const perpOffset = minCorrd + Math.random() * (maxCorrd - minCorrd);
-          const tangentJitter = (Math.random() * 2.0 - 1.0) * 4.0;
+      // 2. Generate high-density continuous roadside details strips on LEFT and RIGHT sides of the road
+      console.log('Generating continuous roadside vegetation strips with optimized densities...');
+      for (let s = 0; s < steps; s++) {
+        const u = s / steps;
+        const pt = trackHelper.curve.getPointAt(u);
+        const tangent = trackHelper.curve.getTangentAt(u).normalize();
+        const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
+        const roadWidth = trackHelper.getRoadWidthAt(u);
+        const rType = trackHelper.getRoadTypeAt(u);
 
-          const pos = new THREE.Vector3()
-            .copy(pt)
-            .addScaledVector(normal, side * perpOffset)
-            .addScaledVector(tangent, tangentJitter);
+        if (rType === 'bridge') continue;
 
-          pos.y = terrainManager.getHeight(pos.x, pos.z);
+        for (let side of [-1, 1]) {
+          const clusterNoise = SimpleNoise.noise(pt.x / 40.0, pt.z / 40.0);
+          
+          // Populate roadside items based on local cluster noise logic (reduced coordinates count)
+          const spawnGrass = (clusterNoise > 0.35) ? (Math.random() < 0.35) : (Math.random() < 0.10);
+          const spawnFlower = (clusterNoise > 0.45) ? (Math.random() < 0.20) : (Math.random() < 0.05);
+          const spawnBush = (clusterNoise > 0.30) ? (Math.random() < 0.20) : (Math.random() < 0.04);
+          const spawnPlant = (clusterNoise > 0.40) ? (Math.random() < 0.18) : (Math.random() < 0.03);
+          const spawnRock = (clusterNoise > 0.25) ? (Math.random() < 0.12) : (Math.random() < 0.02);
 
-          if (this.isValidTreeLocation(pos, u, trackHelper)) {
-            const mappedType = treeIdCounter % 4; // 0=Pine, 1=Old, 2=Sakura, 3=GN
-            const tScale = 0.8 + Math.random() * 0.7; // 0.8 to 1.5
-            const tRotY = Math.random() * Math.PI * 2; // 0 to 360 deg
+          const spawnChecks = [spawnGrass, spawnFlower, spawnBush, spawnPlant, spawnRock];
 
-            const newTree: ForestTree = {
-              id: treeIdCounter++,
+          for (let cat = 0; cat < 5; cat++) {
+            if (!spawnChecks[cat]) continue;
+
+            let minOffset = 0.3;
+            let maxOffset = 1.8;
+            if (cat === 0) { // Grass
+              minOffset = 0.3; maxOffset = 1.8;
+            } else if (cat === 1) { // Flower
+              minOffset = 1.8; maxOffset = 4.2;
+            } else if (cat === 2) { // Bush
+              minOffset = 4.2; maxOffset = 8.5;
+            } else if (cat === 3) { // Plant
+              minOffset = 8.5; maxOffset = 12.0;
+            } else if (cat === 4) { // Rock
+              minOffset = 12.0; maxOffset = 15.0;
+            }
+
+            const perpOffset = roadWidth / 2 + minOffset + Math.random() * (maxOffset - minOffset);
+            const tangentJitter = (Math.random() * 2.0 - 1.0) * 1.5;
+
+            const pos = new THREE.Vector3()
+              .copy(pt)
+              .addScaledVector(normal, side * perpOffset)
+              .addScaledVector(tangent, tangentJitter);
+
+            pos.y = terrainManager.getHeight(pos.x, pos.z);
+
+            // Skip if inside deep water level
+            if (pos.y < 2.0) continue;
+
+            // Skip near key game landmarks
+            if (pos.distanceToSquared(trackHelper.pagodaPos) < 1225) continue; // 35m
+            if (pos.distanceToSquared(trackHelper.waterfallPos) < 1600) continue; // 40m
+
+            // Skip near starting/finish line
+            if (u < 0.03 || u > 0.97) continue;
+
+            // Skip near village houses
+            let nearHouse = false;
+            for (let house of trackHelper.villageHouses) {
+              if (pos.distanceToSquared(house.position) < 169) { // 13m
+                nearHouse = true;
+                break;
+              }
+            }
+            if (nearHouse) continue;
+
+            const scaleVal = 0.8 + Math.random() * 0.7; // 0.8 to 1.5 Scale
+            const rotYVal = Math.random() * Math.PI * 2; // 0 to 360 deg Rotation
+
+            this.roadsideCoords[cat].push({
               position: pos,
-              scale: tScale,
-              rotationY: tRotY,
-              type: mappedType
-            };
-            this.trees.push(newTree);
-            this.treesByType[mappedType].push(newTree);
-          }
-        }
-
-        // --- BAND 2: Medium Corridor (60m to 200m from road edge) ---
-        const medNoise = SimpleNoise.noise(pt.x / 90.0, pt.z / 90.0);
-        if (Math.random() < 0.38 * medNoise) {
-          const minCorrd = roadWidth / 2 + 60.0;
-          const maxCorrd = roadWidth / 2 + 200.0;
-          const attempts = 2;
-          for (let att = 0; att < attempts; att++) {
-            const perpOffset = minCorrd + Math.random() * (maxCorrd - minCorrd);
-            const tangentJitter = (Math.random() * 2.0 - 1.0) * 12.0;
-
-            const pos = new THREE.Vector3()
-              .copy(pt)
-              .addScaledVector(normal, side * perpOffset)
-              .addScaledVector(tangent, tangentJitter);
-
-            pos.y = terrainManager.getHeight(pos.x, pos.z);
-
-            if (this.isValidTreeLocation(pos, u, trackHelper)) {
-              const mappedType = treeIdCounter % 4;
-              const tScale = 0.8 + Math.random() * 0.7;
-              const tRotY = Math.random() * Math.PI * 2;
-
-              const newTree: ForestTree = {
-                id: treeIdCounter++,
-                position: pos,
-                scale: tScale,
-                rotationY: tRotY,
-                type: mappedType
-              };
-              this.trees.push(newTree);
-              this.treesByType[mappedType].push(newTree);
-            }
-          }
-        }
-
-        // --- BAND 3: Dense Corridor (200m to 800m from road edge) ---
-        const wideNoise = SimpleNoise.noise(pt.x / 180.0, pt.z / 180.0);
-        if (Math.random() < 0.75 * wideNoise) {
-          const minCorrd = roadWidth / 2 + 200.0;
-          const maxCorrd = roadWidth / 2 + 800.0;
-          const attempts = 4;
-          for (let att = 0; att < attempts; att++) {
-            const perpOffset = minCorrd + Math.random() * (maxCorrd - minCorrd);
-            const tangentJitter = (Math.random() * 2.0 - 1.0) * 35.0;
-
-            const pos = new THREE.Vector3()
-              .copy(pt)
-              .addScaledVector(normal, side * perpOffset)
-              .addScaledVector(tangent, tangentJitter);
-
-            pos.y = terrainManager.getHeight(pos.x, pos.z);
-
-            if (this.isValidTreeLocation(pos, u, trackHelper)) {
-              const mappedType = treeIdCounter % 4;
-              const tScale = 0.8 + Math.random() * 0.7;
-              const tRotY = Math.random() * Math.PI * 2;
-
-              const newTree: ForestTree = {
-                id: treeIdCounter++,
-                position: pos,
-                scale: tScale,
-                rotationY: tRotY,
-                type: mappedType
-              };
-              this.trees.push(newTree);
-              this.treesByType[mappedType].push(newTree);
-            }
+              scale: scaleVal,
+              rotationY: rotYVal
+            });
           }
         }
       }
-    }
-
-    console.log(`Forest populated organic: Total of ${this.trees.length} valid trees arranged into organic clusters!`);
-
-    // 2. Generate high-density continuous roadside details strips on LEFT and RIGHT sides of the road
-    console.log('Generating continuous roadside vegetation strips...');
-    for (let s = 0; s < steps; s++) {
-      const u = s / steps;
-      const pt = trackHelper.curve.getPointAt(u);
-      const tangent = trackHelper.curve.getTangentAt(u).normalize();
-      const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
-      const roadWidth = trackHelper.getRoadWidthAt(u);
-      const rType = trackHelper.getRoadTypeAt(u);
-
-      if (rType === 'bridge') continue;
-
-      for (let side of [-1, 1]) {
-        const clusterNoise = SimpleNoise.noise(pt.x / 40.0, pt.z / 40.0);
-        
-        // Populate roadside items based on local cluster noise logic
-        const spawnGrass = (clusterNoise > 0.35) ? (Math.random() < 0.90) : (Math.random() < 0.30);
-        const spawnFlower = (clusterNoise > 0.45) ? (Math.random() < 0.70) : (Math.random() < 0.20);
-        const spawnBush = (clusterNoise > 0.30) ? (Math.random() < 0.75) : (Math.random() < 0.15);
-        const spawnPlant = (clusterNoise > 0.40) ? (Math.random() < 0.60) : (Math.random() < 0.10);
-        const spawnRock = (clusterNoise > 0.25) ? (Math.random() < 0.45) : (Math.random() < 0.08);
-
-        const spawnChecks = [spawnGrass, spawnFlower, spawnBush, spawnPlant, spawnRock];
-
-        for (let cat = 0; cat < 5; cat++) {
-          if (!spawnChecks[cat]) continue;
-
-          // Road Edge -> Grass -> Flowers -> Bushes -> Ground Plants -> Small Rocks
-          let minOffset = 0.3;
-          let maxOffset = 1.8;
-          if (cat === 0) { // Grass
-            minOffset = 0.3; maxOffset = 1.8;
-          } else if (cat === 1) { // Flower
-            minOffset = 1.8; maxOffset = 4.2;
-          } else if (cat === 2) { // Bush
-            minOffset = 4.2; maxOffset = 8.5;
-          } else if (cat === 3) { // Plant
-            minOffset = 8.5; maxOffset = 12.0;
-          } else if (cat === 4) { // Rock
-            minOffset = 12.0; maxOffset = 15.0;
-          }
-
-          const perpOffset = roadWidth / 2 + minOffset + Math.random() * (maxOffset - minOffset);
-          const tangentJitter = (Math.random() * 2.0 - 1.0) * 1.5;
-
-          const pos = new THREE.Vector3()
-            .copy(pt)
-            .addScaledVector(normal, side * perpOffset)
-            .addScaledVector(tangent, tangentJitter);
-
-          pos.y = terrainManager.getHeight(pos.x, pos.z);
-
-          // Skip if inside deep water level
-          if (pos.y < 2.0) continue;
-
-          // Skip near key game landmarks
-          if (pos.distanceToSquared(trackHelper.pagodaPos) < 1225) continue; // 35m
-          if (pos.distanceToSquared(trackHelper.waterfallPos) < 1600) continue; // 40m
-
-          // Skip near starting/finish line
-          if (u < 0.03 || u > 0.97) continue;
-
-          // Skip near village houses
-          let nearHouse = false;
-          for (let house of trackHelper.villageHouses) {
-            if (pos.distanceToSquared(house.position) < 169) { // 13m
-              nearHouse = true;
-              break;
-            }
-          }
-          if (nearHouse) continue;
-
-          const scaleVal = 0.8 + Math.random() * 0.7; // 0.8 to 1.5 Scale
-          const rotYVal = Math.random() * Math.PI * 2; // 0 to 360 deg Rotation
-
-          this.roadsideCoords[cat].push({
-            position: pos,
-            scale: scaleVal,
-            rotationY: rotYVal
-          });
-        }
-      }
+    } else {
+      console.log('Successfully re-used organic coord system. Total Forest Trees preserved:', this.trees.length);
     }
 
     // 3. Pre-create High-LOD placeholder instanced meshes (for immediate responsive loading, swapped in background)
@@ -405,13 +406,13 @@ export class ForestSystem {
     this.lastCameraPos.copy(playerPos);
 
     // Dynamic Level of Detail squared range parameters:
-    // 0 - 120m: Full GLB models
-    // 120 - 400m: Low-poly models
-    // 400 - 1000m: Billboard trees
-    // Beyond 1000m: Unload (Scale to 0)
-    const highDistSq = 120 * 120;
-    const medDistSq = 400 * 400;
-    const lowDistSq = 1000 * 1000;
+    // 0 - 500 (22m): Near trees
+    // 500 - 2000 (45m): Medium
+    // 2000 - 5000 (70m): Far billboards
+    // Beyond 5000: Unload (Scale to 0)
+    const highDistSq = 500;
+    const medDistSq = 2000;
+    const lowDistSq = 5000;
 
     // 1. UPDATE CHOSEN LOD FOR FOREST TREES
     for (let type = 0; type < 4; type++) {
