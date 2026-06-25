@@ -74,17 +74,54 @@ export class DragonTrackWorld {
     // 3. Road Network, Skidmarks, center lines, barriers guardrails
     this.buildRoadNetwork(scene, trackHelper);
 
-    // 4. Section Sceneries & Landmarks
-    buildForest(scene, trackHelper);
-    buildVillage(scene, trackHelper);
-    buildBridge(scene, trackHelper);
-    buildTunnel(scene, trackHelper);
-    this.waterfallCtrl = buildWaterfall(scene, trackHelper);
-    buildHairpins(scene, trackHelper);
-    buildTemple(scene, trackHelper);
-    buildHighway(scene, trackHelper);
-    this.finishAreaCtrl = buildFinishArea(scene, trackHelper);
-    this.animalsCtrl = buildAnimals(scene, trackHelper);
+    // 4. Section Sceneries & Landmarks (Staggered asynchronous background loading)
+    console.log('[SceneryLoader] Starting background asynchronous world streaming...');
+    
+    // Forest system (trees & vegetation) loaded first
+    setTimeout(() => {
+      const start = performance.now();
+      buildForest(scene, trackHelper);
+      console.log(`[SceneryLoader] Background: Forest loaded in ${(performance.now() - start).toFixed(1)}ms`);
+    }, 40);
+
+    // Village loaded second
+    setTimeout(() => {
+      const start = performance.now();
+      buildVillage(scene, trackHelper);
+      console.log(`[SceneryLoader] Background: Village loaded in ${(performance.now() - start).toFixed(1)}ms`);
+    }, 120);
+
+    // Structural elements (Bridge & Tunnel)
+    setTimeout(() => {
+      const start = performance.now();
+      buildBridge(scene, trackHelper);
+      buildTunnel(scene, trackHelper);
+      console.log(`[SceneryLoader] Background: Bridge & Tunnel loaded in ${(performance.now() - start).toFixed(1)}ms`);
+    }, 200);
+
+    // Natural landscape visualizers
+    setTimeout(() => {
+      const start = performance.now();
+      this.waterfallCtrl = buildWaterfall(scene, trackHelper);
+      buildHairpins(scene, trackHelper);
+      console.log(`[SceneryLoader] Background: Waterfall & Hairpins loaded in ${(performance.now() - start).toFixed(1)}ms`);
+    }, 280);
+
+    // Temple & Highway sections
+    setTimeout(() => {
+      const start = performance.now();
+      buildTemple(scene, trackHelper);
+      buildHighway(scene, trackHelper);
+      console.log(`[SceneryLoader] Background: Temple & Highway loaded in ${(performance.now() - start).toFixed(1)}ms`);
+    }, 360);
+
+    // Celebratory area & wildlife
+    setTimeout(() => {
+      const start = performance.now();
+      this.finishAreaCtrl = buildFinishArea(scene, trackHelper);
+      this.animalsCtrl = buildAnimals(scene, trackHelper);
+      console.log(`[SceneryLoader] Background: Finish Area & Animals loaded in ${(performance.now() - start).toFixed(1)}ms`);
+    }, 440);
 
     (window as any).worldReady = true;
   }

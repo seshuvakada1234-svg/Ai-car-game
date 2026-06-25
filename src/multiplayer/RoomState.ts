@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export type RoomStatus = 'waiting' | 'countdown' | 'racing' | 'finished';
+export type RoomStatus = 'waiting' | 'countdown' | 'racing' | 'finished' | 'archived' | 'closed' | 'complete';
 
 export interface RoomPlayer {
   uid: string;
@@ -54,4 +54,5 @@ export interface RoomState {
   selectedCar?: string; // alias for compatibility
   gameState: string;
   currentPlayers: number;
+  isArchived?: boolean;
 }

@@ -147,7 +147,7 @@ export class RoomService {
       console.log("Room exists:", roomExists);
 
       if (!roomExists) {
-        throw new Error('Invalid room code');
+        throw new Error('Room Closed');
       }
 
       const room = snap.data() as RoomState;
@@ -197,7 +197,8 @@ export class RoomService {
       await setDoc(playerRef, newPlayer);
 
     } catch (e: any) {
-      if (e.message === 'Invalid room code' || e.message === 'Room expired' || e.message === 'Room full' || e.message === 'Race already started') {
+      const specErrors = ['Room Closed', 'Room Archived', 'Room Finished', 'Room Expired', 'Room Full', 'Invalid room code', 'Room expired', 'Room full', 'Race already started'];
+      if (specErrors.includes(e.message)) {
         throw e;
       }
       handleFirestoreError(e, OperationType.WRITE, `rooms/${cleanCode}`);

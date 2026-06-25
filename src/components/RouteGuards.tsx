@@ -26,12 +26,29 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowe
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  if (allowedRoles && !allowedRoles.includes(profile.role)) {
+  // --- STRICT DUAL BROADCASTER ROLE FIREWALL ---
+  const role = profile.role;
+
+  // 1. STREAM_CLIENT account is STRICTLY forbidden from accessing anything else except /live
+  if (role === 'STREAM_CLIENT' && location.pathname !== '/live') {
+    return <Navigate to="/live" replace />;
+  }
+
+  // 2. Resolve equivalent roles for backwards compatibility
+  const isAllowed = allowedRoles ? allowedRoles.some(allowed => {
+    if (allowed === role) return true;
+    if (allowed === 'broadcaster' && (role === 'BROADCAST_ADMIN' || role === 'broadcaster')) return true;
+    if (allowed === 'user' && (role === 'PLAYER' || role === 'user')) return true;
+    if (allowed === 'admin' && (role === 'admin' || role === 'BROADCAST_ADMIN')) return true;
+    return false;
+  }) : true;
+
+  if (!isAllowed) {
     // Redirect based on actual role
-    if (profile.role === 'admin') {
-      return <Navigate to="/admin" replace />;
-    } else if (profile.role === 'broadcaster') {
+    if (role === 'admin' || role === 'BROADCAST_ADMIN') {
       return <Navigate to="/broadcaster" replace />;
+    } else if (role === 'STREAM_CLIENT') {
+      return <Navigate to="/live" replace />;
     } else {
       return <Navigate to="/garage" replace />;
     }
@@ -58,10 +75,11 @@ export const PublicRoute: React.FC<PublicRouteProps> = ({ children }) => {
 
   if (user && profile) {
     // Already authenticated, redirect to default path per role
-    if (profile.role === 'admin') {
-      return <Navigate to="/admin" replace />;
-    } else if (profile.role === 'broadcaster') {
+    const role = profile.role;
+    if (role === 'admin' || role === 'BROADCAST_ADMIN') {
       return <Navigate to="/broadcaster" replace />;
+    } else if (role === 'STREAM_CLIENT') {
+      return <Navigate to="/live" replace />;
     } else {
       return <Navigate to="/garage" replace />;
     }

@@ -38,7 +38,7 @@ export interface NormalRoom {
   ownerName: string;
   selectedCar: string;
   mapId: string;
-  status: 'waiting' | 'countdown' | 'racing' | 'finished';
+  status: 'waiting' | 'countdown' | 'racing' | 'finished' | 'archived' | 'closed' | 'complete';
   maxPlayers: number;
   currentPlayers: number;
   players: string[];

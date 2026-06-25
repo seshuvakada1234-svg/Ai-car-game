@@ -4,7 +4,7 @@ import { signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/aut
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firestoreError';
 
-export type UserRole = 'admin' | 'broadcaster' | 'user';
+export type UserRole = 'admin' | 'broadcaster' | 'user' | 'BROADCAST_ADMIN' | 'STREAM_CLIENT' | 'PLAYER';
 
 export interface UserProfile {
   uid: string;
@@ -33,20 +33,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Determine role based on email as requested
   const getRoleFromEmail = (email: string | null): UserRole => {
-    if (!email) return 'user';
+    if (!email) return 'PLAYER';
     const emailLower = email.toLowerCase().trim();
     if (
       emailLower === 'seshuvakada1234@gmail.com' ||
       emailLower === 'resumepro.ads@gmail.com'
     ) {
       return 'admin';
-    } else if (
-      emailLower === 'seshuvakada522@gmail.com' ||
-      emailLower === 'seshuvakada5@gmail.com'
-    ) {
-      return 'broadcaster';
+    } else if (emailLower === 'seshuvakada522@gmail.com') {
+      return 'BROADCAST_ADMIN';
+    } else if (emailLower === 'seshuvakada5@gmail.com') {
+      return 'STREAM_CLIENT';
     }
-    return 'user';
+    return 'PLAYER';
   };
 
   useEffect(() => {

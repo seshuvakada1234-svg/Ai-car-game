@@ -45,6 +45,15 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) =>
     );
   }
 
+  const isBroadcasterUI = location.pathname.startsWith('/broadcaster');
+  if (isBroadcasterUI) {
+    return (
+      <div className="min-h-screen bg-[#05070B] text-[#E2E8F0] font-sans antialiased overflow-x-hidden">
+        {children}
+      </div>
+    );
+  }
+
   const handleSignOut = async () => {
     setProfileDropdownOpen(false);
     setMobileMenuOpen(false);

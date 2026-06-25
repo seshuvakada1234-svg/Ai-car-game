@@ -598,34 +598,16 @@ export const preloadGLTFAssets = async (): Promise<void> => {
   }
   isPreloadingStarted = true;
   try {
-    // 1. Preload Scenery model structures (Cars are loaded on-demand during selected car download)
-    const tryLoadPath = async (paths: string[]): Promise<THREE.Group | null> => {
-      for (const p of paths) {
-        try {
-          const loadPromise = assetManager.loadGLTF(p);
-          const timeoutPromise = new Promise<any>((_, reject) => 
-            setTimeout(() => reject(new Error(`Timeout loading path ${p}`)), 2000)
-          );
-          const gltf = await Promise.race([loadPromise, timeoutPromise]);
-          return gltf?.scene || gltf || null;
-        } catch (e) {
-          console.warn(`[tryLoadPath] Failed or timed out loading asset at ${p}:`, e);
-        }
-      }
-      return null;
-    };
-
-    gltfModelCache.treeModel = await tryLoadPath([
-      'https://pub-a248afed72844944a7565dc9cbaacbb0.r2.dev/Trees/pine_tree_-_ps1_low_poly.glb',
-      'https://pub-a248afed72844944a7565dc9cbaacbb0.r2.dev/Trees/old_tree.glb'
-    ]);
-
+    const startTime = performance.now();
+    // Failing tree assets have been completely removed from preloading requests
+    gltfModelCache.treeModel = null;
     gltfModelCache.rockModel = null;
     gltfModelCache.mountainModel = null;
     gltfModelCache.pagodaModel = null;
 
     gltfModelCache.isLoaded = true;
-    console.log('Hypercar models loaded successfully.');
+    const loadDuration = performance.now() - startTime;
+    console.log(`Hypercar models and landscape caches initialized in ${loadDuration.toFixed(1)}ms.`);
   } catch (err) {
     console.warn('Asset loading error:', err);
   }

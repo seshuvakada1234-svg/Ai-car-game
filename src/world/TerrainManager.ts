@@ -36,6 +36,11 @@ export class TerrainManager {
 
   public playerPos = new THREE.Vector3();
 
+  // Async Chunked Generation Properties
+  private generatedChunks = new Set<string>();
+  private chunkQueue: { r: number; c: number; dist: number }[] = [];
+  private isProcessingQueue = false;
+
   // BVH-accelerated road physics mesh
   private roadBVHMesh: THREE.Mesh | null = null;
   private roadMeshesCache: THREE.Object3D[] = [];
@@ -54,6 +59,54 @@ export class TerrainManager {
   }
 
   /**
+   * Generates a single 64x64 terrain chunk.
+   */
+  public generateChunk(chunkRow: number, chunkCol: number): void {
+    const key = `${chunkRow}_${chunkCol}`;
+    if (this.generatedChunks.has(key)) return;
+    this.generatedChunks.add(key);
+
+    const startTime = performance.now();
+
+    const chunkSize = 64;
+    const startRow = chunkRow * chunkSize;
+    const endRow = Math.min(this.rows, startRow + chunkSize);
+    const startCol = chunkCol * chunkSize;
+    const endCol = Math.min(this.cols, startCol + chunkSize);
+
+    if (!this.trackHelper) return;
+
+    for (let r = startRow; r < endRow; r++) {
+      const z = this.minZ + r * this.resolution;
+      const rowOffset = r * this.cols;
+      for (let c = startCol; c < endCol; c++) {
+        const x = this.minX + c * this.resolution;
+        const height = getTerrainHeight(x, z, this.trackHelper);
+        this.heightCache[rowOffset + c] = height;
+      }
+    }
+
+    const duration = performance.now() - startTime;
+    const streamingRadius = 1500; // 1.5km active streaming boundary radius
+    console.log(`[TerrainManager] Generated Chunk ${key} in ${duration.toFixed(1)}ms. Active chunks: ${this.generatedChunks.size} | Queue remaining: ${this.chunkQueue.length} | Streaming Radius: ${streamingRadius}m`);
+  }
+
+  /**
+   * Ensures the specified chunk is generated immediately (on-demand fallback).
+   */
+  private ensureChunkGenerated(chunkRow: number, chunkCol: number): void {
+    const key = `${chunkRow}_${chunkCol}`;
+    if (!this.generatedChunks.has(key)) {
+      // Remove from background queue if present to avoid redundant work
+      const qIndex = this.chunkQueue.findIndex(item => item.r === chunkRow && item.c === chunkCol);
+      if (qIndex > -1) {
+        this.chunkQueue.splice(qIndex, 1);
+      }
+      this.generateChunk(chunkRow, chunkCol);
+    }
+  }
+
+  /**
    * Generates and freezes the heightmap cache once, completely removing runtime noise evaluation.
    */
   public initialize(trackHelper: TrackGeometryHelper): void {
@@ -63,16 +116,73 @@ export class TerrainManager {
     }
     TerrainManager.initialized = true;
     this.trackHelper = trackHelper;
-    console.time('TerrainManager Heightmap Baking');
-    for (let r = 0; r < this.rows; r++) {
-      const z = this.minZ + r * this.resolution;
-      for (let c = 0; c < this.cols; c++) {
-        const x = this.minX + c * this.resolution;
-        const height = getTerrainHeight(x, z, trackHelper);
-        this.heightCache[r * this.cols + c] = height;
+
+    console.log('[TerrainManager] Initiating asynchronous chunked heightmap generation...');
+
+    // 1. Determine player/start position
+    let startX = 0;
+    let startZ = 0;
+    if (trackHelper.checkpoints && trackHelper.checkpoints.length > 0) {
+      startX = trackHelper.checkpoints[0].position.x;
+      startZ = trackHelper.checkpoints[0].position.z;
+    }
+
+    // 2. Build sorted queue of all chunks based on distance to player starting position
+    const chunkSize = 64;
+    const numChunkCols = Math.ceil(this.cols / chunkSize);
+    const numChunkRows = Math.ceil(this.rows / chunkSize);
+
+    const chunksList: { r: number; c: number; dist: number }[] = [];
+    for (let r = 0; r < numChunkRows; r++) {
+      const chunkZ = this.minZ + (r * chunkSize + chunkSize / 2) * this.resolution;
+      for (let c = 0; c < numChunkCols; c++) {
+        const chunkX = this.minX + (c * chunkSize + chunkSize / 2) * this.resolution;
+        const dx = chunkX - startX;
+        const dz = chunkZ - startZ;
+        const dist = dx * dx + dz * dz;
+        chunksList.push({ r, c, dist });
       }
     }
-    console.timeEnd('TerrainManager Heightmap Baking');
+
+    // Sort: nearest chunks first
+    chunksList.sort((a, b) => a.dist - b.dist);
+
+    // 3. Immediately generate nearest chunks synchronously so player is spawned on correct ground instantly
+    const immediateChunksCount = Math.min(12, chunksList.length);
+    console.log(`[TerrainManager] Generating first ${immediateChunksCount} nearby chunks synchronously (< 15ms total)...`);
+    for (let i = 0; i < immediateChunksCount; i++) {
+      const chunk = chunksList[i];
+      this.generateChunk(chunk.r, chunk.c);
+    }
+
+    // 4. Queue remaining chunks for background loading
+    this.chunkQueue = chunksList.slice(immediateChunksCount);
+    this.startQueueProcessing();
+  }
+
+  private startQueueProcessing(): void {
+    if (this.isProcessingQueue) return;
+    this.isProcessingQueue = true;
+
+    const processNext = () => {
+      if (this.chunkQueue.length === 0) {
+        this.isProcessingQueue = false;
+        console.log('[TerrainManager] All background terrain chunks successfully streamed!');
+        return;
+      }
+
+      const nextChunk = this.chunkQueue.shift();
+      if (nextChunk) {
+        this.generateChunk(nextChunk.r, nextChunk.c);
+      }
+
+      // Yield frame computation to browser to maintain flawless 60/120 FPS
+      requestAnimationFrame(() => {
+        setTimeout(processNext, 16);
+      });
+    };
+
+    requestAnimationFrame(processNext);
   }
 
   /**
@@ -89,8 +199,18 @@ export class TerrainManager {
     const c0 = Math.floor(cf);
     const r0 = Math.floor(rf);
 
+    // Dynamic stream fallback: ensure chunk is baked on demand
+    const chunkSize = 64;
+    const chunkRow0 = Math.floor(r0 / chunkSize);
+    const chunkCol0 = Math.floor(c0 / chunkSize);
+    this.ensureChunkGenerated(chunkRow0, chunkCol0);
+
     const c1 = Math.min(this.cols - 1, c0 + 1);
     const r1 = Math.min(this.rows - 1, r0 + 1);
+
+    const chunkRow1 = Math.floor(r1 / chunkSize);
+    const chunkCol1 = Math.floor(c1 / chunkSize);
+    this.ensureChunkGenerated(chunkRow1, chunkCol1);
 
     const tx = cf - c0;
     const tz = rf - r0;

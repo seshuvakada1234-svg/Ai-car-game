@@ -768,8 +768,8 @@ export class ForestSystem {
     loader.register((parser) => new GLTFMaterialsPBRSpecularGlossinessExtension(parser));
 
     const allUrls = [
-      'https://pub-a248afed72844944a7565dc9cbaacbb0.r2.dev/Trees/pine_tree_-_ps1_low_poly.glb',
-      'https://pub-a248afed72844944a7565dc9cbaacbb0.r2.dev/Trees/old_tree.glb',
+      '', // pine tree - removed
+      '', // old tree - removed
       'https://pub-a248afed72844944a7565dc9cbaacbb0.r2.dev/Trees/sakura.glb',
       'https://pub-a248afed72844944a7565dc9cbaacbb0.r2.dev/Trees/tree_gn.glb',
       'https://pub-a248afed72844944a7565dc9cbaacbb0.r2.dev/Trees/stylized_nature_pack_vol-1__3d_tree.glb'
@@ -777,7 +777,11 @@ export class ForestSystem {
 
     console.log('Initiating tree and vegetation asset preloader pipeline in background...');
 
-    allUrls.forEach((url, index) => {
+    const loadPromises = allUrls.map((url, index) => {
+      if (!url) {
+        return Promise.resolve();
+      }
+
       if (ForestSystem.treeCache.has(url)) {
         console.log(`Reusing cached asset for ${url}`);
         const cachedScene = ForestSystem.treeCache.get(url)!;
@@ -788,36 +792,46 @@ export class ForestSystem {
           const submeshes = this.extractSubmeshes(cachedScene.clone(true));
           this.swapHighDetailPlacer(scene, index, submeshes);
         }
-        return;
+        return Promise.resolve();
       }
 
       if (ForestSystem.activeDownloads.has(url)) {
         console.log(`Avoid duplicate download of: ${url} (already loading)`);
-        return;
+        return Promise.resolve();
       }
       ForestSystem.activeDownloads.add(url);
+      const startTime = performance.now();
 
-      loader.load(
-        url,
-        (gltf) => {
-          console.log(`Successfully completed preloading GLB: ${url}`);
-          applyGltfMaterialFix(gltf.scene);
-          ForestSystem.treeCache.set(url, gltf.scene);
-          ForestSystem.activeDownloads.delete(url);
-          if (index === 4) {
-            const classified = this.extractAndClassifyNaturePack(gltf.scene);
-            this.swapRoadsidePlacer(scene, classified);
-          } else {
-            const submeshes = this.extractSubmeshes(gltf.scene);
-            this.swapHighDetailPlacer(scene, index, submeshes);
+      return new Promise<void>((resolve) => {
+        loader.load(
+          url,
+          (gltf) => {
+            const duration = performance.now() - startTime;
+            console.log(`Successfully completed preloading GLB: ${url} in ${duration.toFixed(1)}ms`);
+            applyGltfMaterialFix(gltf.scene);
+            ForestSystem.treeCache.set(url, gltf.scene);
+            ForestSystem.activeDownloads.delete(url);
+            if (index === 4) {
+              const classified = this.extractAndClassifyNaturePack(gltf.scene);
+              this.swapRoadsidePlacer(scene, classified);
+            } else {
+              const submeshes = this.extractSubmeshes(gltf.scene);
+              this.swapHighDetailPlacer(scene, index, submeshes);
+            }
+            resolve();
+          },
+          undefined,
+          (error) => {
+            console.error(`Recoverable: Could not download asset model from ${url}. Switched to fallback placeholders.`, error);
+            ForestSystem.activeDownloads.delete(url);
+            resolve();
           }
-        },
-        undefined,
-        (error) => {
-          console.error(`Recoverable: Could not download asset model from ${url}. Switched to fallback placeholders.`, error);
-          ForestSystem.activeDownloads.delete(url);
-        }
-      );
+        );
+      });
+    });
+
+    Promise.allSettled(loadPromises).then(() => {
+      console.log('Tree and vegetation preloader pipeline completed all operations.');
     });
   }
 

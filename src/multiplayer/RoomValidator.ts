@@ -15,7 +15,27 @@ export class RoomValidator {
    */
   public static validateRoomToJoin(room: RoomState | null): void {
     if (!room) {
-      throw new Error('Invalid room code');
+      throw new Error('Room Closed');
+    }
+
+    // Verify room not archived
+    if (room.isArchived === true || room.status === 'archived') {
+      throw new Error('Room Archived');
+    }
+
+    // Verify room is finished
+    if (room.status === 'finished' || room.status === 'complete') {
+      throw new Error('Room Finished');
+    }
+
+    // Verify room is active / not closed
+    if (room.status === 'closed') {
+      throw new Error('Room Closed');
+    }
+
+    // Verify waiting or racing
+    if (room.status !== 'waiting' && room.status !== 'racing') {
+      throw new Error('Room Closed');
     }
 
     // Checking 30 minutes room expiration (last active check)
@@ -60,19 +80,14 @@ export class RoomValidator {
     }
 
     if (isExpired) {
-      throw new Error('Room expired');
-    }
-
-    // Check status
-    if (room.status !== 'waiting') {
-      throw new Error('Invalid room code');
+      throw new Error('Room Expired');
     }
 
     // Check capacity
     const playersList = room.players || [];
-    const maxCount = room.maxPlayers || 3;
+    const maxCount = room.maxPlayers || 6;
     if (playersList.length >= maxCount) {
-      throw new Error('Room full');
+      throw new Error('Room Full');
     }
   }
 

@@ -14,7 +14,7 @@ import { Menu } from './components/Menu';
 import { GameOver } from './components/GameOver';
 import { SplashScreen } from './components/SplashScreen';
 import { OrientationForceLandscape } from './components/OrientationGuard';
-import { Trophy, Compass, Sparkles, Volume2, VolumeX, AlertCircle, Sun, Cloud, CloudRain, CloudFog, Moon } from 'lucide-react';
+import { Trophy, Compass, Sparkles, Volume2, VolumeX, AlertCircle, Sun, Cloud, CloudRain, CloudFog, Moon, Radio, RefreshCw } from 'lucide-react';
 import { selectRandomPlayerCar, setPlayerSelectedModelKey } from './world/procedural';
 
 // Multiplayer integrations
@@ -42,6 +42,7 @@ import { CreateRoomPage } from './components/CreateRoomPage';
 import { JoinRoomPage } from './components/JoinRoomPage';
 import { WaitingLobbyPage } from './components/WaitingLobbyPage';
 import { UserRacePage } from './components/UserRacePage';
+import { SpectatorPage } from './components/SpectatorPage';
 
 // Performance Offline Asset Stream System Imports
 import { useAssetStatus } from './hooks/useAssetStatus';
@@ -50,7 +51,7 @@ import { RaceLoadingScreen } from './components/RaceLoadingScreen';
 
 // Firebase Firestore functions to report player score highscores
 import { db } from './lib/firebase';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, doc, getDoc } from 'firebase/firestore';
 
 interface RacingCanvasUnitProps {
   settings: GameSettings | null;
@@ -321,6 +322,8 @@ function AppBody() {
 
   // Staging join model overlay
   const [showJoinModal, setShowJoinModal] = useState(false);
+  const [isJoiningLive, setIsJoiningLive] = useState(false);
+  const [liveJoinError, setLiveJoinError] = useState<string | null>(null);
   const [multiplayerCachedSettings, setMultiplayerCachedSettings] = useState<GameSettings | null>(null);
   const [playerSelectedModelKey, setPlayerSelectedModelKeyLocal] = useState<string>('ferrari_purosangue');
 
@@ -510,6 +513,47 @@ function AppBody() {
       setPhase('multiplayer_lobby');
     } else {
       throw new Error("Matchmaker: Joining room failed - Code not found or full");
+    }
+  };
+
+  const handleJoinLiveRace = async () => {
+    setIsJoiningLive(true);
+    setLiveJoinError(null);
+    try {
+      const docRef = doc(db, 'live', 'current');
+      const docSnap = await getDoc(docRef);
+      if (!docSnap.exists()) {
+        throw new Error("No active live race found. Inform your broadcaster to start a live race staging room.");
+      }
+      const data = docSnap.data();
+      const code = data?.roomCode || data?.code || data?.room || data?.id;
+      if (!code) {
+        throw new Error("The live race exists, but no valid lobby code has been published yet.");
+      }
+      
+      const playerName = profile?.name || 'Racer Handle';
+      const selectedCar = 'ferrari';
+      const carColor = '#00ccff';
+
+      setMultiplayerCachedSettings({
+        playerName,
+        difficulty: 'medium',
+        carColor,
+        selectedCar,
+        selectedMap: 'map1'
+      });
+
+      const success = await mp.joinRoom(code, playerName, selectedCar, carColor);
+      if (success) {
+        setPhase('multiplayer_lobby');
+      } else {
+        throw new Error(`Failed to join room '${code}'. The room might be full or inactive.`);
+      }
+    } catch (err: any) {
+      console.error("Live Join error:", err);
+      setLiveJoinError(err.message || String(err));
+    } finally {
+      setIsJoiningLive(false);
     }
   };
 
@@ -723,6 +767,11 @@ function AppBody() {
       <Route path="/broadcaster/camera" element={<ProtectedRoute allowedRoles={['broadcaster']}><DashboardLayout><BroadcasterLiveDesk /></DashboardLayout></ProtectedRoute>} />
       <Route path="/broadcaster/overlay" element={<ProtectedRoute allowedRoles={['broadcaster']}><DashboardLayout><BroadcasterLiveDesk /></DashboardLayout></ProtectedRoute>} />
 
+      {/* Esports Live Stream Spectator Client (Locked to STREAM_CLIENT role) */}
+      <Route path="/live" element={<ProtectedRoute allowedRoles={['STREAM_CLIENT']}><SpectatorPage /></ProtectedRoute>} />
+      {/* Public Spectator View (Accessible by Players/Admins/Broadcasters) */}
+      <Route path="/spectator" element={<ProtectedRoute allowedRoles={['user', 'admin', 'broadcaster']}><SpectatorPage /></ProtectedRoute>} />
+
        {/* Pro Racer User Protected Pages */}
        <Route path="/garage" element={
          <ProtectedRoute allowedRoles={['user', 'admin', 'broadcaster']}>
@@ -787,12 +836,40 @@ function AppBody() {
                     <p className="text-xs text-slate-404 leading-relaxed">
                       If another player or broadcaster has created a multiplayer game session, retrieve the 6-digit invitation Room Code and enter it to jump straight on the line up!
                     </p>
-                    <button
-                      onClick={() => handleJoinRoom({ playerName: profile?.name || 'Racer Handle', difficulty: 'medium', carColor: '#00ccff', selectedCar: 'ferrari', selectedMap: 'map1' })}
-                      className="w-full py-4 bg-indigo-650 hover:bg-indigo-600 text-white font-black uppercase text-xs tracking-widest rounded-2xl transition shadow-[0_4px_18px_rgba(99,102,241,0.2)] cursor-pointer"
-                    >
-                      ENTER LOBBY CODE
-                    </button>
+                    
+                    {liveJoinError && (
+                      <div className="p-3 bg-red-950/40 border border-red-500/20 text-red-400 rounded-xl text-xs flex items-center space-x-2 animate-pulse">
+                        <AlertCircle className="w-4 h-4 shrink-0" />
+                        <span>{liveJoinError}</span>
+                      </div>
+                    )}
+
+                    <div className="space-y-3.5 pt-2">
+                      <button
+                        onClick={handleJoinLiveRace}
+                        disabled={isJoiningLive}
+                        className="w-full py-4 bg-gradient-to-r from-cyan-500 to-indigo-600 hover:from-cyan-400 hover:to-indigo-550 disabled:opacity-50 text-white font-black uppercase text-xs tracking-widest rounded-2xl transition shadow-[0_4px_20px_rgba(6,182,212,0.35)] flex items-center justify-center space-x-2 cursor-pointer border border-cyan-500/30"
+                      >
+                        {isJoiningLive ? (
+                          <>
+                            <RefreshCw className="w-4 h-4 animate-spin" />
+                            <span>CONNECTING TO LIVE...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Radio className="w-4 h-4 animate-pulse" />
+                            <span>JOIN LIVE RACE</span>
+                          </>
+                        )}
+                      </button>
+
+                      <button
+                        onClick={() => handleJoinRoom({ playerName: profile?.name || 'Racer Handle', difficulty: 'medium', carColor: '#00ccff', selectedCar: 'ferrari', selectedMap: 'map1' })}
+                        className="w-full py-3.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-400 hover:text-white font-black uppercase text-xs tracking-widest rounded-2xl transition cursor-pointer"
+                      >
+                        ENTER CODE MANUALLY
+                      </button>
+                    </div>
                   </div>
 
                   <div className="bg-slate-950/60 p-6 sm:p-8 rounded-3xl border border-slate-900 space-y-4 flex flex-col justify-between">

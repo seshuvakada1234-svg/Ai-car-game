@@ -32,8 +32,9 @@ service cloud.firestore {
 
     function getExpectedRole(email) {
       return (email == 'seshuvakada1234@gmail.com' || email == 'resumepro.ads@gmail.com') ? 'admin' :
-             (email == 'seshuvakada522@gmail.com' || email == 'seshuvakada5@gmail.com') ? 'broadcaster' :
-             'user';
+             (email == 'seshuvakada522@gmail.com') ? 'BROADCAST_ADMIN' :
+             (email == 'seshuvakada5@gmail.com') ? 'STREAM_CLIENT' :
+             'PLAYER';
     }
 
     // USERS COLLECTION
@@ -49,12 +50,14 @@ service cloud.firestore {
 
       // On creation, we validate the profile maps exactly to their verified auth registration email and role
       allow create: if isSignedIn() && request.auth.uid == userId && 
-                    request.resource.data.role == getExpectedRole(request.auth.token.get('email', '')) && 
-                    request.resource.data.email == request.auth.token.get('email', '');
+                    'email' in request.auth.token &&
+                    request.resource.data.role == getExpectedRole(request.auth.token.email) && 
+                    request.resource.data.email == request.auth.token.email;
 
       // Allow users to update their own profiles (e.g. displayName/photo) but protect against unauthorized privilege escalations
       allow update: if isSignedIn() && request.auth.uid == userId && 
-                    request.resource.data.role == resource.data.role && 
+                    'email' in request.auth.token &&
+                    (request.resource.data.role == resource.data.role || request.resource.data.role == getExpectedRole(request.auth.token.email)) && 
                     request.resource.data.email == resource.data.email;
 
       // Admins can perform structural updates on users
@@ -138,6 +141,15 @@ service cloud.firestore {
       match /players/{uid} {
         allow read, write: if isSignedIn();
       }
+    }
+    
+    // LIVE COLLECTION (Broadcaster Live Syncing Metadata)
+    match /live/{docId} {
+      // Live current details are publicly queryable by authenticated users so they can auto-join
+      allow read, get: if isSignedIn();
+
+      // Only broadcaster or admin can write/update/delete live states
+      allow write, create, update, delete: if isSignedIn() && (isAdmin() || isBroadcaster());
     }
   }
 }

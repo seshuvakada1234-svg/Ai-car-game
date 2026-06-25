@@ -24,7 +24,7 @@
         },
         "role": {
           "type": "string",
-          "enum": ["user", "broadcaster", "admin"],
+          "enum": ["user", "broadcaster", "admin", "BROADCAST_ADMIN", "STREAM_CLIENT", "PLAYER"],
           "description": "Permission tier role of the user, derived from their verified email."
         },
         "createdAt": {
@@ -211,9 +211,30 @@
         }
       },
       "required": ["uid", "playerName", "joinedAt", "ready"]
+    },
+    "Live": {
+      "title": "Live Broadcast Staging",
+      "description": "The active live streaming race metadata mapping currently active race room code for automatic spectator and racer synchronization.",
+      "type": "object",
+      "properties": {
+        "roomCode": {
+          "type": "string",
+          "description": "The 6-digit active matchmaker staging room code."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of broadcast updates."
+        }
+      },
+      "required": ["roomCode"]
     }
   },
   "firestore": {
+    "/live/{docId}": {
+      "schema": "Live",
+      "description": "Collection tracking active public broadcaster live streams."
+    },
     "/users/{userId}": {
       "schema": "User",
       "description": "Profiles collection mapping users or invited roles by verified emails."

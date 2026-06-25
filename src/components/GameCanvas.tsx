@@ -39,6 +39,7 @@ interface GameCanvasProps {
   soundEnabled?: boolean;
   timeOfDay?: 'morning' | 'noon' | 'sunset' | 'night';
   weather?: 'sunny' | 'cloudy' | 'foggy' | 'rain';
+  cameraMode?: string;
 }
 
 // Shared global instances to preserve WebGL context and loaded GPU memory across React mount/unmount lifecycles
@@ -57,6 +58,7 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
   soundEnabled = true,
   timeOfDay = 'sunset',
   weather = 'sunny',
+  cameraMode = 'third-person',
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const flareRef = useRef<HTMLDivElement>(null);
@@ -95,6 +97,7 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
 
   const timeOfDayRef = useRef<'morning' | 'noon' | 'sunset' | 'night'>(timeOfDay);
   const weatherRef = useRef<'sunny' | 'cloudy' | 'foggy' | 'rain'>(weather);
+  const cameraModeRef = useRef<string>(cameraMode);
 
   // Directly assign references inside the render function body to keep them 100% synchronized
   carsRef.current = cars;
@@ -106,6 +109,7 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
   soundEnabledRef.current = soundEnabled;
   timeOfDayRef.current = timeOfDay;
   weatherRef.current = weather;
+  cameraModeRef.current = cameraMode;
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -495,7 +499,7 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
         lodManager.update(pPos);
 
         // Update Camera Controller and shake rumble
-        cameraController.update(player, elapsedSec, controlsRef.current);
+        cameraController.update(player, elapsedSec, controlsRef.current, cameraModeRef.current);
 
         // Render Speed lines
         const shouldShowSpeedLines = velocityMagnitude > 40;

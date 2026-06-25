@@ -136,22 +136,57 @@ export class CameraController {
       this.forward.normalize();
     }
 
-    // 7. Render dynamic camera location behind chase focal node
-    this.desiredPosition
-      .copy(this.carPosition)
-      .addScaledVector(this.forward, -currentDistance)
-      .addScaledVector(this.up, currentHeight);
+    // 7. Calculate camera position and look targets based on activeMode (Esports Director selection)
+    const mode = (activeMode || 'third-person').toLowerCase().trim();
 
-    // Lateral offset based on side sway (NFS/Asphalt apex framing)
-    this.carRight.set(-this.forward.z, 0, this.forward.x).normalize();
-    this.desiredPosition.addScaledVector(this.carRight, this.sideSway);
+    if (mode === 'drone') {
+      // Cinematic hovering drone
+      this.desiredPosition.copy(this.carPosition).add(new THREE.Vector3(12, 10, 12));
+      this.desiredLookTarget.copy(this.carPosition);
+    } else if (mode === 'finish') {
+      // Positioned ahead lookback sweep
+      this.desiredPosition.copy(this.carPosition).addScaledVector(this.forward, 25).add(new THREE.Vector3(5, 2, 5));
+      this.desiredLookTarget.copy(this.carPosition);
+    } else if (mode === 'helicopter') {
+      // High aerial bird-eye scan
+      this.desiredPosition.copy(this.carPosition).add(new THREE.Vector3(0, 30, 2));
+      this.desiredLookTarget.copy(this.carPosition);
+    } else if (mode === 'replay') {
+      // Low side-angle tracking shot
+      this.desiredPosition.copy(this.carPosition).addScaledVector(this.forward, -15).add(new THREE.Vector3(-10, 1.2, 5));
+      this.desiredLookTarget.copy(this.carPosition);
+    } else if (mode === 'pit') {
+      // Pit lane observer camera
+      this.desiredPosition.copy(this.carPosition).add(new THREE.Vector3(-15, 3, -5));
+      this.desiredLookTarget.copy(this.carPosition);
+    } else if (mode === 'cinematic') {
+      // Smooth orbital camera rotation around the focused car
+      const angle = (Date.now() / 4000) % (Math.PI * 2);
+      const orbitRadius = 14.0;
+      const orbitHeight = 5.0;
+      this.desiredPosition.set(
+        this.carPosition.x + Math.sin(angle) * orbitRadius,
+        this.carPosition.y + orbitHeight,
+        this.carPosition.z + Math.cos(angle) * orbitRadius
+      );
+      this.desiredLookTarget.copy(this.carPosition);
+    } else {
+      // DEFAULT: 'third-person' (Forza Horizon 5 chase style)
+      this.desiredPosition
+        .copy(this.carPosition)
+        .addScaledVector(this.forward, -currentDistance)
+        .addScaledVector(this.up, currentHeight);
 
-    // 8. Place dynamic look point incorporating speed and side framing offsets
-    this.desiredLookTarget
-      .copy(this.carPosition)
-      .addScaledVector(this.forward, currentLookahead)
-      .addScaledVector(this.up, currentLookaheadHeight)
-      .addScaledVector(this.carRight, this.sideSway * 0.45);
+      // Lateral offset based on side sway (NFS/Asphalt apex framing)
+      this.carRight.set(-this.forward.z, 0, this.forward.x).normalize();
+      this.desiredPosition.addScaledVector(this.carRight, this.sideSway);
+
+      this.desiredLookTarget
+        .copy(this.carPosition)
+        .addScaledVector(this.forward, currentLookahead)
+        .addScaledVector(this.up, currentLookaheadHeight)
+        .addScaledVector(this.carRight, this.sideSway * 0.45);
+    }
 
     // Smooth position and target tracking
     if (!this.isInitialized) {

@@ -8,7 +8,7 @@ import { RoomState, RoomPlayer as GenericRoomPlayer } from './RoomState';
 import { Unsubscribe } from 'firebase/firestore';
 import { auth } from '../lib/firebase';
 
-export type RoomStatus = 'waiting' | 'countdown' | 'racing' | 'finished';
+export type RoomStatus = 'waiting' | 'countdown' | 'racing' | 'finished' | 'archived' | 'closed' | 'complete';
 
 export interface RoomPlayer {
   id: string;
